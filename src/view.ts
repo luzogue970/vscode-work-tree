@@ -18,7 +18,7 @@ interface Payload {
   error?: string;
 }
 
-type Incoming = { type: "ready" } | { type: "update" } | { type: "open"; id: string };
+type Incoming = { type: "ready" } | { type: "refresh" } | { type: "update" } | { type: "open"; id: string };
 
 export class WorktreesView implements vscode.WebviewViewProvider {
   static readonly id = "worktreeHub.view";
@@ -33,7 +33,7 @@ export class WorktreesView implements vscode.WebviewViewProvider {
     view.webview.options = { enableScripts: true, localResourceRoots: [this.media] };
     view.webview.html = this.html(view.webview);
     view.webview.onDidReceiveMessage((message: Incoming) => {
-      if (message.type === "ready") void this.refresh(true);
+      if (message.type === "ready" || message.type === "refresh") void this.refresh(true);
       if (message.type === "open") void vscode.commands.executeCommand("claude-vscode.editor.open", message.id);
       if (message.type === "update") void vscode.commands.executeCommand("worktreeHub.update");
     });
@@ -50,12 +50,13 @@ export class WorktreesView implements vscode.WebviewViewProvider {
 
   async refresh(force = false): Promise<void> {
     if (!this.view) return;
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const payload = root ? await load(root) : { groups: [], error: "Aucun dossier ouvert" };
+    const webview = this.view.webview;
+    if (force) await webview.postMessage({ type: "loading" });
+    const payload = force ? await vscode.window.withProgress({ location: { viewId: WorktreesView.id } }, () => load()) : await load();
     const serialized = JSON.stringify(payload);
     if (!force && serialized === this.lastPosted) return;
     this.lastPosted = serialized;
-    await this.view.webview.postMessage({ type: "data", running: this.running, update: this.update, ...payload });
+    await webview.postMessage({ type: "data", running: this.running, update: this.update, refreshedAt: Date.now(), ...payload });
   }
 
   private html(webview: vscode.Webview): string {
@@ -70,6 +71,7 @@ export class WorktreesView implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${css}">
 </head>
 <body>
+<div id="progress" class="progress"></div>
 <div id="root"></div>
 <script nonce="${nonce}" src="${js}"></script>
 </body>
@@ -77,7 +79,9 @@ export class WorktreesView implements vscode.WebviewViewProvider {
   }
 }
 
-async function load(root: string): Promise<Payload> {
+async function load(): Promise<Payload> {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!root) return { groups: [], error: "Aucun dossier ouvert" };
   try {
     return { groups: await buildGroups(root) };
   } catch (error) {

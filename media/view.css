@@ -13,6 +13,13 @@
   --wt-cta-hover: var(--vscode-button-hoverBackground);
   --wt-cta-glow: var(--vscode-focusBorder);
   --wt-info-font-size: 0.85em;
+  --wt-progress: var(--vscode-progressBar-background);
+  --wt-loading-opacity: 0.5;
+  --wt-tag-background: var(--vscode-badge-background);
+  --wt-tag-foreground: var(--vscode-badge-foreground);
+  --wt-button-background: var(--vscode-button-secondaryBackground);
+  --wt-button-foreground: var(--vscode-button-secondaryForeground);
+  --wt-button-hover: var(--vscode-button-secondaryHoverBackground);
   --wt-accent-saturation: 70%;
   --wt-accent-lightness: 58%;
   --wt-accent-soft-alpha: 0.18;
@@ -33,6 +40,38 @@ body {
   color: var(--wt-foreground);
 }
 
+.progress {
+  position: sticky;
+  top: 0;
+  height: 3px;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+.progress::before {
+  content: "";
+  display: block;
+  height: 100%;
+  width: 40%;
+  background: var(--wt-progress);
+  animation: wt-slide 1s linear infinite;
+}
+
+body.loading .progress {
+  visibility: visible;
+}
+
+body.loading .group,
+body.loading .message {
+  opacity: var(--wt-loading-opacity);
+  transition: opacity 0.15s;
+}
+
+@keyframes wt-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
 .hub-header {
   display: flex;
   flex-wrap: wrap;
@@ -46,6 +85,38 @@ body {
 .hub-header .version {
   font-weight: 600;
   color: var(--wt-foreground);
+}
+
+.hub-header .status {
+  flex-basis: 100%;
+}
+
+body.loading .hub-header .status {
+  color: var(--wt-foreground);
+  font-weight: 600;
+}
+
+.hub-header .refresh {
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--wt-radius);
+  background: var(--wt-button-background);
+  color: var(--wt-button-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.hub-header .refresh:hover {
+  background: var(--wt-button-hover);
+}
+
+.tag {
+  padding: 0 6px;
+  border-radius: var(--wt-radius);
+  background: var(--wt-tag-background);
+  color: var(--wt-tag-foreground);
+  font-size: 0.75em;
+  font-weight: 500;
 }
 
 .hub-header .update {

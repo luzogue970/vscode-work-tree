@@ -3,13 +3,30 @@
   const root = document.getElementById("root");
   const state = vscode.getState() ?? { collapsed: {} };
   const hues = [210, 150, 30, 285, 0, 180, 60, 330];
+  const minLoadingMs = 500;
+  let loadingSince = 0;
 
   window.addEventListener("message", (event) => {
-    if (event.data.type === "data") render(event.data);
+    if (event.data.type === "loading") setLoading(true);
+    if (event.data.type === "data") {
+      render(event.data);
+      setTimeout(() => setLoading(false), Math.max(0, loadingSince + minLoadingMs - Date.now()));
+    }
   });
 
-  function render({ groups, error, running, update }) {
-    root.replaceChildren(renderHeader(running, update));
+  setInterval(() => {
+    for (const node of document.querySelectorAll(".time")) node.textContent = ago(Number(node.dataset.ts));
+  }, 30000);
+
+  function setLoading(active) {
+    if (active) loadingSince = Date.now();
+    document.body.classList.toggle("loading", active);
+    const status = root.querySelector(".status");
+    if (status) status.textContent = active ? "Actualisation..." : status.dataset.idle;
+  }
+
+  function render({ groups, error, running, update, refreshedAt }) {
+    root.replaceChildren(renderHeader(running, update, refreshedAt));
     if (error) {
       root.append(el("p", "message error", error));
       return;
@@ -21,20 +38,20 @@
     for (const group of groups) root.append(renderGroup(group));
   }
 
-  function renderHeader(running, update) {
+  function renderHeader(running, update, refreshedAt) {
     const header = el("div", "hub-header");
-    header.append(el("span", "version", `v${running.version}`), el("span", "built", formatDate(running.builtAt)));
+    const status = el("span", "status", `actualisé à ${formatTime(refreshedAt)}`);
+    status.dataset.idle = status.textContent;
+    const refresh = el("button", "refresh", "Actualiser");
+    refresh.title = "Relire les worktrees et les conversations";
+    refresh.addEventListener("click", () => vscode.postMessage({ type: "refresh" }));
+    header.append(el("span", "version", `v${running.version}`), el("span", "built", `build ${formatDate(running.builtAt)}`), status, refresh);
     if (update) {
       const button = el("button", "update", `Mettre à jour : v${update.version} du ${formatDate(update.builtAt)}`);
       button.addEventListener("click", () => vscode.postMessage({ type: "update" }));
       header.append(button);
     }
     return header;
-  }
-
-  function formatDate(iso) {
-    if (!iso) return "date de build inconnue";
-    return new Date(iso).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
   function renderGroup(group) {
@@ -44,7 +61,9 @@
 
     const header = el("header", "group-header");
     header.title = group.path;
-    header.append(el("span", "chevron"), el("span", "name", group.name), el("span", "branch", group.branch), el("span", "count", String(group.sessions.length)));
+    header.append(el("span", "chevron"), el("span", "name", group.name), el("span", "branch", group.branch));
+    if (group.main) header.append(el("span", "tag", "principal"));
+    header.append(el("span", "count", String(group.sessions.length)));
     header.addEventListener("click", () => {
       state.collapsed[group.path] = !state.collapsed[group.path];
       vscode.setState(state);
@@ -63,8 +82,10 @@
     const item = el("li", "session");
     item.tabIndex = 0;
     item.title = session.id;
+    const time = el("span", "time", ago(session.modified));
+    time.dataset.ts = String(session.modified);
     const meta = el("span", "meta");
-    meta.append(el("span", "time", ago(session.modified)));
+    meta.append(time);
     if (session.branch && session.branch !== group.branch) meta.append(el("span", "branch", session.branch));
     item.append(el("span", "title", session.title), meta);
     const open = () => vscode.postMessage({ type: "open", id: session.id });
@@ -88,6 +109,15 @@
     return node;
   }
 
+  function formatDate(iso) {
+    if (!iso) return "inconnu";
+    return new Date(iso).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function formatTime(timestamp) {
+    return new Date(timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
   function ago(timestamp) {
     const minutes = Math.round((Date.now() - timestamp) / 60000);
     if (minutes < 1) return "à l'instant";
@@ -97,5 +127,6 @@
     return `il y a ${Math.round(hours / 24)} j`;
   }
 
+  setLoading(true);
   vscode.postMessage({ type: "ready" });
 })();
