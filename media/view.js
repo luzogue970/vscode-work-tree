@@ -61,11 +61,11 @@
     const header = el("header", "group-header");
     header.title = group.path;
     header.append(el("span", "chevron"), el("span", "name", group.name), el("span", "branch", group.branch));
-    if (group.main) header.append(el("span", "tag", "principal"));
-    if (group.state === "taken") header.append(el("span", "tag state", "tenue par le principal"));
+    if (group.main) header.append(el("span", "tag", "current"));
+    if (group.state === "taken") header.append(el("span", "tag state", "sur current"));
     if (group.state === "detached") header.append(el("span", "tag state", "détaché"));
-    if (!group.main && group.state === "owned") header.append(action("Aller", "git switch " + group.branch + " dans le checkout principal ; ce worktree passe en détaché", "goto", group));
-    if (!group.main && group.state === "taken") header.append(action("Rendre", "Rend " + group.branch + " à ce worktree ; le checkout principal revient sur sa branche précédente", "giveBack", group));
+    if (!group.main && group.state === "owned") header.append(action("Aller", "Committe le travail non committé du worktree sur " + group.branch + " (wip: snapshot), puis git switch " + group.branch + " sur current ; le worktree reste sur les mêmes fichiers, détaché", "goto", group));
+    if (!group.main && group.state === "taken") header.append(action("Revenir", "Committe les modifs non committées de current sur " + group.branch + ", current revient sur sa branche précédente et le worktree reprend " + group.branch, "giveBack", group));
     section.append(header);
     if (group.main) return section;
 
