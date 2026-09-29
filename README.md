@@ -1,27 +1,25 @@
-# Claude Worktrees
+# Worktree Hub
 
-Extension VSCodium compagnon de Claude Code : une vue "Worktrees" sous la liste des sessions
-Claude, qui regroupe les conversations par worktree git. Un clic ouvre la conversation.
+Extension VSCodium compagnon de Claude Code : une entrée "Worktree Hub" dans la barre d'activité,
+avec les conversations Claude regroupées par worktree git. Un clic ouvre la conversation.
 
 ## Ce qu'elle lit
 
 - `git worktree list --porcelain` dans le dossier ouvert.
-- Les transcripts `~/.claude/projects/<dossier>/*.jsonl` du checkout principal et de chaque
-  worktree : `cwd`, `gitBranch`, titre (`customTitle`, `aiTitle`, `lastPrompt`, premier message).
+- Les transcripts `~/.claude/projects/<dossier>/*.jsonl` de chaque worktree : `cwd`, `gitBranch`,
+  titre (`customTitle`, `aiTitle`, `lastPrompt`, premier message).
 - Le clic appelle la commande interne `claude-vscode.editor.open` avec l'id de session. Non
   documentée : à revérifier après chaque mise à jour de l'extension Claude Code.
 
 ## Construire et installer (fish)
 
 ```fish
-cd ~/Documents/mes-dev/claude-worktrees
+cd ~/Documents/mes-dev/worktree-hub
 npm ci
 npm run install:codium
 ```
 
-Puis recharger la fenêtre VSCodium ("Developer: Reload Window"). Si la vue apparaît dans
-l'explorateur plutôt que sous Claude, la glisser dans le conteneur Claude Code de la barre
-d'activité.
+Puis "Developer: Restart Extension Host" dans VSCodium.
 
 ## Développer
 
@@ -30,3 +28,4 @@ d'activité.
 - `media/view.css` : toutes les couleurs et tailles sont des variables `--wt-*` en tête de
   fichier. `media/view.js` : rendu de la liste. Après modification, "Developer: Reload Webviews".
 - `src/claude.ts` : lecture des transcripts. `src/git.ts` : worktrees. `src/view.ts` : vue.
+- Historique git en Conventional Commits (`feat`, `fix`, `refactor`, `chore`), sujet en anglais.

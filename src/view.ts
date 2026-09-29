@@ -15,7 +15,7 @@ interface Group {
 type Incoming = { type: "ready" } | { type: "open"; id: string };
 
 export class WorktreesView implements vscode.WebviewViewProvider {
-  static readonly id = "claudeWorktrees.view";
+  static readonly id = "worktreeHub.view";
   private view: vscode.WebviewView | undefined;
 
   constructor(private readonly media: vscode.Uri) {}

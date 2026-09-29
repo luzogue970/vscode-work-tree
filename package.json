@@ -1,7 +1,7 @@
 {
-  "name": "claude-worktrees",
-  "displayName": "Claude Worktrees",
-  "description": "Sessions Claude Code groupées par worktree git, un clic pour ouvrir la conversation.",
+  "name": "worktree-hub",
+  "displayName": "Worktree Hub",
+  "description": "Conversations Claude Code groupées par worktree git, un clic pour ouvrir la conversation.",
   "version": "0.1.0",
   "publisher": "mathieulp",
   "private": true,
@@ -16,27 +16,37 @@
     "anthropic.claude-code"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "worktreeHub",
+          "title": "Worktree Hub",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
     "views": {
-      "claude-sessions-sidebar": [
+      "worktreeHub": [
         {
           "type": "webview",
-          "id": "claudeWorktrees.view",
-          "name": "Worktrees"
+          "id": "worktreeHub.view",
+          "name": "Sessions",
+          "icon": "media/icon.svg"
         }
       ]
     },
     "commands": [
       {
-        "command": "claudeWorktrees.refresh",
-        "title": "Claude Worktrees : rafraîchir",
+        "command": "worktreeHub.refresh",
+        "title": "Worktree Hub : rafraîchir",
         "icon": "$(refresh)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "claudeWorktrees.refresh",
-          "when": "view == claudeWorktrees.view",
+          "command": "worktreeHub.refresh",
+          "when": "view == worktreeHub.view",
           "group": "navigation"
         }
       ]
@@ -45,8 +55,8 @@
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -w -p .",
-    "package": "npm run build && vsce package --allow-missing-repository --skip-license",
-    "install:codium": "npm run package && codium --install-extension claude-worktrees-0.1.0.vsix"
+    "package": "npm run build && vsce package --allow-missing-repository --skip-license -o worktree-hub.vsix",
+    "install:codium": "npm run package && codium --install-extension worktree-hub.vsix"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

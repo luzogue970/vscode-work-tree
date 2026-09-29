@@ -19,7 +19,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     ...watchers,
     vscode.window.registerWebviewViewProvider(WorktreesView.id, view),
-    vscode.commands.registerCommand("claudeWorktrees.refresh", () => view.refresh()),
+    vscode.commands.registerCommand("worktreeHub.refresh", () => view.refresh()),
   );
 }
 
