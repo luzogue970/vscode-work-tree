@@ -62,6 +62,10 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
     for (const listener of this.listeners.splice(0)) listener.dispose();
   }
 
+  transition(path: string, lines: string[], status: "running" | "done" | "error"): void {
+    void this.view?.webview.postMessage({ type: "transition", path, lines, status });
+  }
+
   setUpdate(update: Build | undefined): void {
     if (update?.builtAt === this.update?.builtAt) return;
     this.update = update;

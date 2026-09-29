@@ -22,6 +22,8 @@
   --wt-button-hover: var(--vscode-button-secondaryHoverBackground);
   --wt-warning: var(--vscode-editorWarning-foreground);
   --wt-warning-soft-alpha: 0.18;
+  --wt-success: var(--vscode-testing-iconPassed, var(--vscode-terminal-ansiGreen));
+  --wt-busy-opacity: 0.5;
   --wt-accent-saturation: 70%;
   --wt-accent-lightness: 58%;
   --wt-accent-soft-alpha: 0.18;
@@ -147,6 +149,63 @@ body.loading .hub-header .status {
 
 .action:hover {
   background: var(--wt-accent-soft);
+}
+
+body.busy .action {
+  pointer-events: none;
+  opacity: var(--wt-busy-opacity);
+}
+
+body.busy .progress {
+  visibility: visible;
+}
+
+.transition {
+  margin: 4px 0 6px 20px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--wt-accent);
+  background: var(--wt-accent-soft);
+  font-size: 0.85em;
+}
+
+.transition .steps {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.transition .step {
+  padding: 1px 0;
+}
+
+.transition.running .step:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-left: 6px;
+  border: 2px solid var(--wt-accent);
+  border-right-color: transparent;
+  border-radius: 50%;
+  vertical-align: middle;
+  animation: wt-spin 0.8s linear infinite;
+}
+
+.transition .result {
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.transition.done .result {
+  color: var(--wt-success);
+}
+
+.transition.error .result,
+.transition.error .step:last-child {
+  color: var(--wt-error);
+}
+
+@keyframes wt-spin {
+  to { transform: rotate(360deg); }
 }
 
 .hub-header .update {
