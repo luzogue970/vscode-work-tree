@@ -104,6 +104,13 @@
     if (transitions[group.path]) section.append(renderTransition(transitions[group.path]));
     if (group.main) return section;
 
+    if (!group.main && group.changes > 0) {
+      const changes = el("span", "tag changes", `${group.changes} modif${group.changes > 1 ? "s" : ""}`);
+      changes.title = "Fichiers modifiés ou nouveaux, non committés, dans le worktree";
+      header.append(changes);
+    }
+    if (!group.main && group.state === "taken" && group.changes > 0) header.append(action("Synchroniser", "Committe les nouvelles modifs du worktree (commit \"wip\") et les amène sur " + group.branch + " dans current, sans quitter la branche", "sync", group));
+    if (!group.main) header.append(action("+", "Nouvelle conversation Claude dans ce worktree : ouvre un onglet ici et lance /worktree " + group.branch, "newSession", group));
     header.append(el("span", "count", String(group.sessions.length)));
     header.addEventListener("click", () => {
       state.collapsed[group.path] = !state.collapsed[group.path];
@@ -128,6 +135,13 @@
     const meta = el("span", "meta");
     meta.append(time);
     if (session.branch && session.branch !== group.branch) meta.append(el("span", "branch", session.branch));
+    const window = el("button", "icon", "↗");
+    window.title = "Ouvrir cette conversation dans une nouvelle fenêtre VSCodium sur le worktree";
+    window.addEventListener("click", (event) => {
+      event.stopPropagation();
+      vscode.postMessage({ type: "openInWindow", session });
+    });
+    meta.append(window);
     item.append(el("span", "title", session.title), meta);
     const open = () => vscode.postMessage({ type: "open", session });
     item.addEventListener("click", open);

@@ -151,6 +151,32 @@ body.loading .hub-header .status {
   background: var(--wt-accent-soft);
 }
 
+.icon {
+  padding: 0 5px;
+  border: none;
+  border-radius: var(--wt-radius);
+  background: transparent;
+  color: var(--wt-muted);
+  font: inherit;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.session:hover .icon,
+.session:focus-within .icon {
+  visibility: visible;
+}
+
+.icon:hover {
+  color: var(--wt-accent);
+  background: var(--wt-accent-soft);
+}
+
+.tag.changes {
+  background: var(--wt-accent-soft);
+  color: var(--wt-accent);
+}
+
 body.busy .action {
   pointer-events: none;
   opacity: var(--wt-busy-opacity);

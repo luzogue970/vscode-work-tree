@@ -2,8 +2,8 @@ import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
-import { listSessions, type Session } from "./claude";
-import { listBranches, listWorktrees } from "./git";
+import { listSessions, mirrorTranscripts, type Session } from "./claude";
+import { countChanges, listBranches, listWorktrees } from "./git";
 
 export interface Target {
   path: string;
@@ -16,6 +16,7 @@ interface Group extends Target {
   name: string;
   main: boolean;
   state: GroupState;
+  changes: number;
   sessions: Session[];
 }
 
@@ -24,7 +25,26 @@ interface Payload {
   error?: string;
 }
 
-type Incoming = { type: "ready" } | { type: "refresh" } | { type: "update" } | { type: "open"; session: Session } | { type: "goto"; target: Target } | { type: "giveBack"; target: Target };
+type Incoming =
+  | { type: "ready" }
+  | { type: "refresh" }
+  | { type: "update" }
+  | { type: "open"; session: Session }
+  | { type: "openInWindow"; session: Session }
+  | { type: "goto"; target: Target }
+  | { type: "giveBack"; target: Target }
+  | { type: "sync"; target: Target }
+  | { type: "newSession"; target: Target };
+
+const commands: Record<Exclude<Incoming["type"], "ready" | "refresh">, string> = {
+  update: "worktreeHub.update",
+  open: "worktreeHub.open",
+  openInWindow: "worktreeHub.openInWindow",
+  goto: "worktreeHub.goto",
+  giveBack: "worktreeHub.giveBack",
+  sync: "worktreeHub.sync",
+  newSession: "worktreeHub.newSession",
+};
 
 export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly id = "worktreeHub.view";
@@ -43,11 +63,12 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
     view.webview.html = this.html(view.webview);
     this.listeners.push(
       view.webview.onDidReceiveMessage((message: Incoming) => {
-        if (message.type === "ready" || message.type === "refresh") void this.refresh(true);
-        if (message.type === "open") void vscode.commands.executeCommand("worktreeHub.open", message.session);
-        if (message.type === "update") void vscode.commands.executeCommand("worktreeHub.update");
-        if (message.type === "goto") void vscode.commands.executeCommand("worktreeHub.goto", message.target);
-        if (message.type === "giveBack") void vscode.commands.executeCommand("worktreeHub.giveBack", message.target);
+        if (message.type === "ready" || message.type === "refresh") {
+          void this.refresh(true);
+          return;
+        }
+        const argument = "session" in message ? message.session : "target" in message ? message.target : undefined;
+        void vscode.commands.executeCommand(commands[message.type], argument);
       }),
       view.onDidChangeVisibility(() => {
         if (view.visible) void this.refresh();
@@ -117,14 +138,17 @@ async function buildGroups(root: string): Promise<Group[]> {
   const worktrees = await listWorktrees(root);
   const branches = await listBranches(root);
   const mainBranch = worktrees[0]?.branch;
-  const groups: Group[] = worktrees.map((tree) => {
+  const groups: Group[] = await Promise.all(worktrees.map(async (tree) => {
     const name = path.basename(tree.path);
     const branch = tree.branch ?? branches.find((candidate) => candidate.replaceAll("/", "-") === name);
     const state: GroupState = tree.branch ? "owned" : branch !== undefined && branch === mainBranch ? "taken" : "detached";
-    return { name, branch: branch ?? "(détaché)", path: tree.path, main: tree.main, state, sessions: [] };
-  });
+    const changes = tree.main ? 0 : await countChanges(tree.path);
+    return { name, branch: branch ?? "(détaché)", path: tree.path, main: tree.main, state, changes, sessions: [] };
+  }));
   const linked = groups.filter((group) => !group.main).sort((a, b) => b.path.length - a.path.length);
-  for (const session of await listSessions(linked.map((group) => group.path))) {
+  const sessions = await listSessions(linked.map((group) => group.path));
+  await mirrorTranscripts(sessions, root);
+  for (const session of sessions) {
     const group = linked.find((candidate) => session.cwd === candidate.path || session.cwd.startsWith(candidate.path + path.sep));
     group?.sessions.push(session);
   }

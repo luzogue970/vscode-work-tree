@@ -94,6 +94,37 @@ export async function moveBranchToWorktree(main: string, worktree: string, branc
   return unwound;
 }
 
+export async function countChanges(cwd: string): Promise<number> {
+  const { stdout } = await git(cwd, "status", "--porcelain", "--untracked-files=all");
+  return stdout.split("\n").filter(Boolean).length;
+}
+
+export async function syncToMain(main: string, worktree: string, branch: string, log: Log): Promise<boolean> {
+  const name = path.basename(worktree);
+  log(`Recherche de travail non committé dans ${name}`);
+  if (!(await snapshot(worktree, name, true))) {
+    log("Rien de nouveau à synchroniser");
+    return false;
+  }
+  const sha = (await git(worktree, "rev-parse", "HEAD")).stdout.trim();
+  log(`Commit "wip" ${sha.slice(0, 7)} créé, intégration sur current`);
+  try {
+    await git(main, "merge", "--ff-only", sha);
+    log(`Avance rapide de ${branch}`);
+  } catch {
+    log(`Avance rapide impossible (${branch} a avancé sur current), cherry-pick`);
+    try {
+      await git(main, "cherry-pick", sha);
+    } catch (error) {
+      await git(main, "cherry-pick", "--abort").catch(() => undefined);
+      throw error;
+    }
+  }
+  log(`Le worktree se réaligne sur ${branch} (détaché)`);
+  await git(worktree, "switch", "--detach", branch);
+  return true;
+}
+
 export function gitError(error: unknown): string {
   const stderr = (error as { stderr?: string }).stderr?.trim();
   return stderr || String(error);

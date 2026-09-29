@@ -3,8 +3,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
-import { projectDir, type Session } from "./claude";
-import { defaultBranch, gitCommonDir, gitError, listWorktrees, moveBranchToMain, moveBranchToWorktree } from "./git";
+import type { Session } from "./claude";
+import { defaultBranch, gitCommonDir, gitError, listWorktrees, moveBranchToMain, moveBranchToWorktree, syncToMain, type Log } from "./git";
 import { WorktreesView, type Target } from "./view";
 
 export interface Loaded {
@@ -21,8 +21,8 @@ interface PendingOpen {
 const pollMs = 5000;
 const pendingOpenKey = "pendingOpen";
 const claudeReadyMs = 1500;
+const tabCheckMs = 2500;
 const openInWorktreeWindow = "Ouvrir une fenêtre sur le worktree";
-const tryHere = "Essayer ici quand même";
 
 export async function activate(context: vscode.ExtensionContext, dir: string, running: Build): Promise<Loaded> {
   const view = new WorktreesView(vscode.Uri.file(path.join(dir, "media")), running);
@@ -39,8 +39,16 @@ export async function activate(context: vscode.ExtensionContext, dir: string, ru
     { dispose: () => clearInterval(poll) },
     vscode.commands.registerCommand("worktreeHub.refresh", () => view.refresh(true)),
     vscode.commands.registerCommand("worktreeHub.open", (session: Session) => openSession(context, session)),
-    vscode.commands.registerCommand("worktreeHub.goto", (target: Target) => moveBranch(context, view, target, "toMain")),
-    vscode.commands.registerCommand("worktreeHub.giveBack", (target: Target) => moveBranch(context, view, target, "toWorktree")),
+    vscode.commands.registerCommand("worktreeHub.openInWindow", (session: Session) => openInWindow(context, session)),
+    vscode.commands.registerCommand("worktreeHub.newSession", (target: Target) => vscode.commands.executeCommand("claude-vscode.editor.open", undefined, `/worktree ${target.branch}`)),
+    vscode.commands.registerCommand("worktreeHub.goto", (target: Target) => transition(view, target, async (main, log) => {
+      await context.workspaceState.update(previousKey(target), main.branch);
+      await moveBranchToMain(main.path, target.path, target.branch, log);
+    })),
+    vscode.commands.registerCommand("worktreeHub.giveBack", (target: Target) => transition(view, target, async (main, log) => {
+      await moveBranchToWorktree(main.path, target.path, target.branch, context.workspaceState.get<string>(previousKey(target)) ?? (await defaultBranch(main.path)), log);
+    })),
+    vscode.commands.registerCommand("worktreeHub.sync", (target: Target) => transition(view, target, (main, log) => syncToMain(main.path, target.path, target.branch, log))),
   ];
   void openPending(context);
   return {
@@ -62,25 +70,53 @@ async function watchPatterns(): Promise<vscode.RelativePattern[]> {
   return patterns;
 }
 
-async function openSession(context: vscode.ExtensionContext, session: Session): Promise<void> {
+async function transition(view: WorktreesView, target: Target, run: (main: { path: string; branch: string | undefined }, log: Log) => Promise<unknown>): Promise<void> {
   const root = workspaceRoot();
   if (!root) return;
+  const lines: string[] = [];
+  const log: Log = (line) => {
+    lines.push(line);
+    view.transition(target.path, lines, "running");
+  };
+  try {
+    await run((await listWorktrees(root))[0], log);
+    view.transition(target.path, lines, "done");
+  } catch (error) {
+    lines.push(gitError(error));
+    view.transition(target.path, lines, "error");
+    void vscode.window.showErrorMessage(`Worktree Hub : ${gitError(error)}`);
+  }
+  await view.refresh(true);
+}
+
+function previousKey(target: Target): string {
+  return `previous:${target.branch}`;
+}
+
+async function openSession(context: vscode.ExtensionContext, session: Session): Promise<void> {
   if (!(await exists(session.file))) {
     void vscode.window.showErrorMessage(`Worktree Hub : transcript introuvable, la conversation n'existe plus (${session.file})`);
     return;
   }
-  if (path.dirname(session.file) === projectDir(root)) {
-    await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
-    return;
-  }
-  const worktree = path.basename(session.cwd);
-  const choice = await vscode.window.showWarningMessage(`Cette conversation vit dans le worktree ${worktree}. Depuis cette fenêtre, Claude Code risque d'ouvrir une conversation vide à la place.`, { modal: true }, openInWorktreeWindow, tryHere);
-  if (choice === openInWorktreeWindow) {
-    await context.globalState.update(pendingOpenKey, { folder: session.cwd, id: session.id } satisfies PendingOpen);
-    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(session.cwd), { forceNewWindow: true });
-  } else if (choice === tryHere) {
-    await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
-  }
+  await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
+  await new Promise((resolve) => setTimeout(resolve, tabCheckMs));
+  if (hasTabTitled(session.title)) return;
+  const choice = await vscode.window.showWarningMessage(`Aucun onglet "${session.title}" après l'ouverture : Claude Code a probablement ouvert une conversation vide à la place de celle du worktree ${path.basename(session.cwd)}.`, openInWorktreeWindow);
+  if (choice === openInWorktreeWindow) await openInWindow(context, session);
+}
+
+function hasTabTitled(title: string): boolean {
+  const needle = normalize(title).slice(0, 12);
+  return vscode.window.tabGroups.all.some((group) => group.tabs.some((tab) => normalize(tab.label).startsWith(needle)));
+}
+
+function normalize(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+async function openInWindow(context: vscode.ExtensionContext, session: Session): Promise<void> {
+  await context.globalState.update(pendingOpenKey, { folder: session.cwd, id: session.id } satisfies PendingOpen);
+  await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(session.cwd), { forceNewWindow: true });
 }
 
 async function openPending(context: vscode.ExtensionContext): Promise<void> {
@@ -91,32 +127,6 @@ async function openPending(context: vscode.ExtensionContext): Promise<void> {
   await vscode.extensions.getExtension("anthropic.claude-code")?.activate();
   await new Promise((resolve) => setTimeout(resolve, claudeReadyMs));
   await vscode.commands.executeCommand("claude-vscode.editor.open", pending.id);
-}
-
-async function moveBranch(context: vscode.ExtensionContext, view: WorktreesView, target: Target, direction: "toMain" | "toWorktree"): Promise<void> {
-  const root = workspaceRoot();
-  if (!root) return;
-  const previousKey = `previous:${target.branch}`;
-  const lines: string[] = [];
-  const log = (line: string) => {
-    lines.push(line);
-    view.transition(target.path, lines, "running");
-  };
-  try {
-    const main = (await listWorktrees(root))[0];
-    if (direction === "toMain") {
-      await context.workspaceState.update(previousKey, main.branch);
-      await moveBranchToMain(main.path, target.path, target.branch, log);
-    } else {
-      await moveBranchToWorktree(main.path, target.path, target.branch, context.workspaceState.get<string>(previousKey) ?? (await defaultBranch(root)), log);
-    }
-    view.transition(target.path, lines, "done");
-  } catch (error) {
-    lines.push(gitError(error));
-    view.transition(target.path, lines, "error");
-    void vscode.window.showErrorMessage(`Worktree Hub : ${gitError(error)}`);
-  }
-  await view.refresh(true);
 }
 
 function workspaceRoot(): string | undefined {
