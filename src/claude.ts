@@ -1,4 +1,4 @@
-import { open, readdir, stat, type FileHandle } from "node:fs/promises";
+import { link, mkdir, open, readdir, stat, type FileHandle } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -24,6 +24,24 @@ export async function listSessions(cwds: string[]): Promise<Session[]> {
   const dirs = [...new Set(cwds.map(projectDir))];
   const perDir = await Promise.all(dirs.map(readProject));
   return perDir.flat().sort((a, b) => b.modified - a.modified);
+}
+
+// EnterWorktree moves the transcript away and the Claude Code list reads only the workspace dir (includeWorktrees: false).
+export async function mirrorTranscripts(sessions: Session[], root: string): Promise<number> {
+  const target = projectDir(root);
+  await mkdir(target, { recursive: true });
+  let linked = 0;
+  for (const session of sessions) {
+    if (path.dirname(session.file) === target) continue;
+    const mirror = path.join(target, path.basename(session.file));
+    try {
+      await link(session.file, mirror);
+      linked++;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+  return linked;
 }
 
 async function readProject(dir: string): Promise<Session[]> {
