@@ -20,3 +20,8 @@ export async function listWorktrees(cwd: string): Promise<Worktree[]> {
       return { path: lines[0].slice("worktree ".length), branch: branch ?? "(detached)", main: index === 0 };
     });
 }
+
+export async function gitCommonDir(cwd: string): Promise<string> {
+  const { stdout } = await run("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd });
+  return stdout.trim();
+}
