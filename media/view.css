@@ -201,6 +201,14 @@ body.loading .hub-header .status {
   user-select: none;
 }
 
+.group.main .group-header {
+  cursor: default;
+}
+
+.group.main .chevron {
+  visibility: hidden;
+}
+
 .chevron {
   width: 6px;
   height: 6px;

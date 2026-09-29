@@ -31,11 +31,8 @@
       root.append(el("p", "message error", error));
       return;
     }
-    if (groups.length === 0) {
-      root.append(el("p", "message", "Aucun worktree. Dans une conversation : /worktree <branche>."));
-      return;
-    }
     for (const group of groups) root.append(renderGroup(group));
+    if (!groups.some((group) => !group.main)) root.append(el("p", "message", "Aucun worktree. Dans une conversation : /worktree <branche>."));
   }
 
   function renderHeader(running, update, refreshedAt) {
@@ -55,7 +52,7 @@
   }
 
   function renderGroup(group) {
-    const section = el("section", `group ${group.state}`);
+    const section = el("section", group.main ? `group main ${group.state}` : `group ${group.state}`);
     section.style.setProperty("--wt-accent-hue", String(hue(group.branch)));
     if (state.collapsed[group.path]) section.classList.add("collapsed");
 
@@ -67,6 +64,9 @@
     if (group.state === "detached") header.append(el("span", "tag state", "détaché"));
     if (!group.main && group.state === "owned") header.append(action("Aller", "git switch " + group.branch + " dans le checkout principal ; ce worktree passe en détaché", "goto", group));
     if (!group.main && group.state === "taken") header.append(action("Rendre", "Rend " + group.branch + " à ce worktree ; le checkout principal revient sur sa branche précédente", "giveBack", group));
+    section.append(header);
+    if (group.main) return section;
+
     header.append(el("span", "count", String(group.sessions.length)));
     header.addEventListener("click", () => {
       state.collapsed[group.path] = !state.collapsed[group.path];
@@ -76,9 +76,9 @@
 
     const list = el("ul", "sessions");
     for (const session of group.sessions) list.append(renderSession(session, group));
-    if (group.sessions.length === 0) list.append(el("li", "message", "Aucune conversation"));
+    if (group.sessions.length === 0) list.append(el("li", "message", "Aucune conversation passée par /worktree"));
 
-    section.append(header, list);
+    section.append(list);
     return section;
   }
 

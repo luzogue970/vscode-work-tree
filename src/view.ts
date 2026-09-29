@@ -107,9 +107,9 @@ async function buildGroups(root: string): Promise<Group[]> {
     const state: GroupState = tree.branch ? "owned" : branch !== undefined && branch === mainBranch ? "taken" : "detached";
     return { name, branch: branch ?? "(détaché)", path: tree.path, main: tree.main, state, sessions: [] };
   });
-  const byDepth = [...groups].sort((a, b) => b.path.length - a.path.length);
-  for (const session of await listSessions(worktrees.map((tree) => tree.path))) {
-    const group = byDepth.find((candidate) => session.cwd === candidate.path || session.cwd.startsWith(candidate.path + path.sep));
+  const linked = groups.filter((group) => !group.main).sort((a, b) => b.path.length - a.path.length);
+  for (const session of await listSessions(linked.map((group) => group.path))) {
+    const group = linked.find((candidate) => session.cwd === candidate.path || session.cwd.startsWith(candidate.path + path.sep));
     group?.sessions.push(session);
   }
   return groups;
