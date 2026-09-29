@@ -1,25 +1,28 @@
-/* Customization: every color and size used below is a variable declared here. */
+/* Customization: every color, size and spacing used below is a variable declared here. */
 :root {
   --wt-font: var(--vscode-font-family);
   --wt-font-size: var(--vscode-font-size);
   --wt-foreground: var(--vscode-sideBar-foreground, var(--vscode-foreground));
   --wt-muted: var(--vscode-descriptionForeground);
   --wt-header-background: var(--vscode-sideBarSectionHeader-background);
-  --wt-header-foreground: var(--vscode-sideBarSectionHeader-foreground, var(--wt-foreground));
   --wt-hover-background: var(--vscode-list-hoverBackground);
   --wt-focus-border: var(--vscode-focusBorder);
-  --wt-branch-background: var(--vscode-badge-background);
-  --wt-branch-foreground: var(--vscode-badge-foreground);
-  --wt-main-branch-background: var(--vscode-statusBarItem-remoteBackground, var(--wt-branch-background));
-  --wt-main-branch-foreground: var(--vscode-statusBarItem-remoteForeground, var(--wt-branch-foreground));
   --wt-error: var(--vscode-errorForeground);
-  --wt-row-height: 22px;
-  --wt-radius: 3px;
+  --wt-accent-saturation: 70%;
+  --wt-accent-lightness: 58%;
+  --wt-accent-soft-alpha: 0.18;
+  --wt-accent-bar: 3px;
+  --wt-group-gap: 12px;
+  --wt-header-padding: 7px 10px;
+  --wt-row-padding: 8px 12px 8px 16px;
+  --wt-row-gap: 3px;
+  --wt-row-margin: 2px 0;
+  --wt-radius: 4px;
 }
 
 body {
   margin: 0;
-  padding: 0;
+  padding: 4px 0 12px;
   font-family: var(--wt-font);
   font-size: var(--wt-font-size);
   color: var(--wt-foreground);
@@ -27,7 +30,7 @@ body {
 
 .message {
   margin: 0;
-  padding: 6px 12px;
+  padding: 8px 12px;
   color: var(--wt-muted);
 }
 
@@ -35,14 +38,19 @@ body {
   color: var(--wt-error);
 }
 
+.group {
+  --wt-accent: hsl(var(--wt-accent-hue) var(--wt-accent-saturation) var(--wt-accent-lightness));
+  --wt-accent-soft: hsl(var(--wt-accent-hue) var(--wt-accent-saturation) var(--wt-accent-lightness) / var(--wt-accent-soft-alpha));
+  margin-bottom: var(--wt-group-gap);
+}
+
 .group-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: var(--wt-row-height);
-  padding: 0 8px;
+  gap: 8px;
+  padding: var(--wt-header-padding);
   background: var(--wt-header-background);
-  color: var(--wt-header-foreground);
+  border-left: var(--wt-accent-bar) solid var(--wt-accent);
   font-weight: 600;
   cursor: pointer;
   user-select: none;
@@ -73,21 +81,16 @@ body {
 }
 
 .branch {
-  padding: 1px 6px;
+  padding: 1px 7px;
   border-radius: var(--wt-radius);
-  background: var(--wt-branch-background);
-  color: var(--wt-branch-foreground);
+  background: var(--wt-accent-soft);
+  color: var(--wt-accent);
   font-size: 0.85em;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 45%;
-}
-
-.group.main > .group-header .branch {
-  background: var(--wt-main-branch-background);
-  color: var(--wt-main-branch-foreground);
+  max-width: 50%;
 }
 
 .count {
@@ -104,16 +107,18 @@ body {
 
 .session {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  height: var(--wt-row-height);
-  padding: 0 8px 0 20px;
+  flex-direction: column;
+  gap: var(--wt-row-gap);
+  margin: var(--wt-row-margin);
+  padding: var(--wt-row-padding);
+  border-left: var(--wt-accent-bar) solid transparent;
   cursor: pointer;
   outline: none;
 }
 
 .session:hover {
   background: var(--wt-hover-background);
+  border-left-color: var(--wt-accent);
 }
 
 .session:focus-visible {
@@ -122,8 +127,6 @@ body {
 }
 
 .session .title {
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -132,8 +135,7 @@ body {
 .meta {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+  gap: 8px;
   color: var(--wt-muted);
   font-size: 0.85em;
 }

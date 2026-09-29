@@ -8,7 +8,6 @@ interface Group {
   name: string;
   branch: string;
   path: string;
-  main: boolean;
   sessions: Session[];
 }
 
@@ -67,12 +66,12 @@ export class WorktreesView implements vscode.WebviewViewProvider {
 }
 
 async function buildGroups(root: string): Promise<Group[]> {
-  const worktrees = await listWorktrees(root);
-  const groups: Group[] = worktrees.map((tree) => ({ name: path.basename(tree.path), branch: tree.branch, path: tree.path, main: tree.main, sessions: [] }));
+  const worktrees = (await listWorktrees(root)).filter((tree) => !tree.main);
+  const groups: Group[] = worktrees.map((tree) => ({ name: path.basename(tree.path), branch: tree.branch, path: tree.path, sessions: [] }));
   const byDepth = [...groups].sort((a, b) => b.path.length - a.path.length);
   for (const session of await listSessions(worktrees.map((tree) => tree.path))) {
-    const group = byDepth.find((candidate) => session.cwd === candidate.path || session.cwd.startsWith(candidate.path + path.sep)) ?? groups[0];
-    group.sessions.push(session);
+    const group = byDepth.find((candidate) => session.cwd === candidate.path || session.cwd.startsWith(candidate.path + path.sep));
+    group?.sessions.push(session);
   }
   return groups;
 }
