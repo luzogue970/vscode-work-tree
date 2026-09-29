@@ -1,0 +1,57 @@
+{
+  "name": "claude-worktrees",
+  "displayName": "Claude Worktrees",
+  "description": "Sessions Claude Code groupées par worktree git, un clic pour ouvrir la conversation.",
+  "version": "0.1.0",
+  "publisher": "mathieulp",
+  "private": true,
+  "engines": {
+    "vscode": "^1.125.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "extensionDependencies": [
+    "anthropic.claude-code"
+  ],
+  "contributes": {
+    "views": {
+      "claude-sessions-sidebar": [
+        {
+          "type": "webview",
+          "id": "claudeWorktrees.view",
+          "name": "Worktrees"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "claudeWorktrees.refresh",
+        "title": "Claude Worktrees : rafraîchir",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "claudeWorktrees.refresh",
+          "when": "view == claudeWorktrees.view",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "package": "npm run build && vsce package --allow-missing-repository --skip-license",
+    "install:codium": "npm run package && codium --install-extension claude-worktrees-0.1.0.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/vscode": "1.125.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

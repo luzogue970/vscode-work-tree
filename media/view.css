@@ -1,0 +1,139 @@
+/* Customization: every color and size used below is a variable declared here. */
+:root {
+  --wt-font: var(--vscode-font-family);
+  --wt-font-size: var(--vscode-font-size);
+  --wt-foreground: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+  --wt-muted: var(--vscode-descriptionForeground);
+  --wt-header-background: var(--vscode-sideBarSectionHeader-background);
+  --wt-header-foreground: var(--vscode-sideBarSectionHeader-foreground, var(--wt-foreground));
+  --wt-hover-background: var(--vscode-list-hoverBackground);
+  --wt-focus-border: var(--vscode-focusBorder);
+  --wt-branch-background: var(--vscode-badge-background);
+  --wt-branch-foreground: var(--vscode-badge-foreground);
+  --wt-main-branch-background: var(--vscode-statusBarItem-remoteBackground, var(--wt-branch-background));
+  --wt-main-branch-foreground: var(--vscode-statusBarItem-remoteForeground, var(--wt-branch-foreground));
+  --wt-error: var(--vscode-errorForeground);
+  --wt-row-height: 22px;
+  --wt-radius: 3px;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--wt-font);
+  font-size: var(--wt-font-size);
+  color: var(--wt-foreground);
+}
+
+.message {
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--wt-muted);
+}
+
+.message.error {
+  color: var(--wt-error);
+}
+
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--wt-row-height);
+  padding: 0 8px;
+  background: var(--wt-header-background);
+  color: var(--wt-header-foreground);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.chevron {
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.1s;
+  flex-shrink: 0;
+}
+
+.collapsed .chevron {
+  transform: rotate(-45deg);
+}
+
+.collapsed .sessions {
+  display: none;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch {
+  padding: 1px 6px;
+  border-radius: var(--wt-radius);
+  background: var(--wt-branch-background);
+  color: var(--wt-branch-foreground);
+  font-size: 0.85em;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+}
+
+.group.main > .group-header .branch {
+  background: var(--wt-main-branch-background);
+  color: var(--wt-main-branch-foreground);
+}
+
+.count {
+  margin-left: auto;
+  color: var(--wt-muted);
+  font-weight: 400;
+}
+
+.sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--wt-row-height);
+  padding: 0 8px 0 20px;
+  cursor: pointer;
+  outline: none;
+}
+
+.session:hover {
+  background: var(--wt-hover-background);
+}
+
+.session:focus-visible {
+  outline: 1px solid var(--wt-focus-border);
+  outline-offset: -1px;
+}
+
+.session .title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  color: var(--wt-muted);
+  font-size: 0.85em;
+}

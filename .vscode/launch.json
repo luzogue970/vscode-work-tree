@@ -1,0 +1,12 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Extension (gliphish)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${userHome}/Documents/ges/gliphish"],
+      "outFiles": ["${workspaceFolder}/out/**/*.js"]
+    }
+  ]
+}
