@@ -31,7 +31,7 @@ export async function activate(context: vscode.ExtensionContext, dir: string, ru
     watcher.onDidChange(refresh);
     watcher.onDidDelete(refresh);
   }
-  const poll = setInterval(refresh, pollMs);
+  const poll = setInterval(refresh, pollMs).unref();
   const disposables: vscode.Disposable[] = [
     ...watchers,
     { dispose: () => clearInterval(poll) },

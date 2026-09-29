@@ -76,7 +76,7 @@ async function readSession(file: string, size: number, modified: number): Promis
       id: path.basename(file, ".jsonl"),
       file,
       title: lastField(tail, "customTitle") ?? firstField(head, "customTitle") ?? lastField(tail, "aiTitle") ?? firstField(head, "aiTitle") ?? lastField(tail, "lastPrompt") ?? prompt,
-      cwd: lastField(tail, "cwd") ?? lastField(tail, "relocatedCwd") ?? firstField(head, "cwd") ?? "",
+      cwd: latestField(tail, ["cwd", "relocatedCwd"]) ?? firstField(head, "cwd") ?? "",
       branch: lastField(tail, "gitBranch") ?? firstField(head, "gitBranch") ?? "",
       modified,
     };
@@ -104,6 +104,16 @@ function lastField(text: string, key: string): string | undefined {
   let last: string | undefined;
   for (const match of text.matchAll(fieldRegex(key))) last = match[1];
   return last === undefined ? undefined : decode(last);
+}
+
+function latestField(text: string, keys: string[]): string | undefined {
+  let latest: { index: number; raw: string } | undefined;
+  for (const key of keys) {
+    for (const match of text.matchAll(fieldRegex(key))) {
+      if (latest === undefined || match.index > latest.index) latest = { index: match.index, raw: match[1] };
+    }
+  }
+  return latest === undefined ? undefined : decode(latest.raw);
 }
 
 function decode(raw: string): string {
