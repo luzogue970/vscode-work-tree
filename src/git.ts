@@ -94,6 +94,26 @@ export async function moveBranchToWorktree(main: string, worktree: string, branc
   return unwound;
 }
 
+export async function mergeTarget(cwd: string): Promise<string> {
+  const branch = await defaultBranch(cwd);
+  try {
+    await git(cwd, "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`);
+    return `origin/${branch}`;
+  } catch {
+    return branch;
+  }
+}
+
+export async function isMerged(cwd: string, branch: string, target: string): Promise<boolean> {
+  try {
+    await git(cwd, "merge-base", "--is-ancestor", branch, target);
+  } catch {
+    return false;
+  }
+  const [tip, base] = await Promise.all([git(cwd, "rev-parse", branch), git(cwd, "rev-parse", target)]);
+  return tip.stdout !== base.stdout;
+}
+
 export async function countChanges(cwd: string): Promise<number> {
   const { stdout } = await git(cwd, "status", "--porcelain", "--untracked-files=all");
   return stdout.split("\n").filter(Boolean).length;

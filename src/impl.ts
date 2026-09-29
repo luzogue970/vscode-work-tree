@@ -21,8 +21,6 @@ interface PendingOpen {
 const pollMs = 5000;
 const pendingOpenKey = "pendingOpen";
 const claudeReadyMs = 1500;
-const tabCheckMs = 2500;
-const openInWorktreeWindow = "Ouvrir une fenêtre sur le worktree";
 
 export async function activate(context: vscode.ExtensionContext, dir: string, running: Build): Promise<Loaded> {
   const view = new WorktreesView(vscode.Uri.file(path.join(dir, "media")), running);
@@ -38,7 +36,7 @@ export async function activate(context: vscode.ExtensionContext, dir: string, ru
     ...watchers,
     { dispose: () => clearInterval(poll) },
     vscode.commands.registerCommand("worktreeHub.refresh", () => view.refresh(true)),
-    vscode.commands.registerCommand("worktreeHub.open", (session: Session) => openSession(context, session)),
+    vscode.commands.registerCommand("worktreeHub.open", (session: Session) => openSession(session)),
     vscode.commands.registerCommand("worktreeHub.openInWindow", (session: Session) => openInWindow(context, session)),
     vscode.commands.registerCommand("worktreeHub.newSession", (target: Target) => vscode.commands.executeCommand("claude-vscode.editor.open", undefined, `/worktree ${target.branch}`)),
     vscode.commands.registerCommand("worktreeHub.goto", (target: Target) => transition(view, target, async (main, log) => {
@@ -93,25 +91,12 @@ function previousKey(target: Target): string {
   return `previous:${target.branch}`;
 }
 
-async function openSession(context: vscode.ExtensionContext, session: Session): Promise<void> {
+async function openSession(session: Session): Promise<void> {
   if (!(await exists(session.file))) {
     void vscode.window.showErrorMessage(`Worktree Hub : transcript introuvable, la conversation n'existe plus (${session.file})`);
     return;
   }
   await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
-  await new Promise((resolve) => setTimeout(resolve, tabCheckMs));
-  if (hasTabTitled(session.title)) return;
-  const choice = await vscode.window.showWarningMessage(`Aucun onglet "${session.title}" après l'ouverture : Claude Code a probablement ouvert une conversation vide à la place de celle du worktree ${path.basename(session.cwd)}.`, openInWorktreeWindow);
-  if (choice === openInWorktreeWindow) await openInWindow(context, session);
-}
-
-function hasTabTitled(title: string): boolean {
-  const needle = normalize(title).slice(0, 12);
-  return vscode.window.tabGroups.all.some((group) => group.tabs.some((tab) => normalize(tab.label).startsWith(needle)));
-}
-
-function normalize(text: string): string {
-  return text.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 async function openInWindow(context: vscode.ExtensionContext, session: Session): Promise<void> {

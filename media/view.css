@@ -290,6 +290,30 @@ body.busy .progress {
   cursor: default;
 }
 
+.archive-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--wt-group-gap);
+  padding: var(--wt-header-padding);
+  color: var(--wt-muted);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.archive.collapsed .archived {
+  display: none;
+}
+
+.archive.collapsed .chevron {
+  transform: rotate(-45deg);
+}
+
+.group.merged {
+  opacity: 0.6;
+}
+
 .group.main .chevron {
   visibility: hidden;
 }

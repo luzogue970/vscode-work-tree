@@ -64,8 +64,26 @@
       root.append(el("p", "message error", error));
       return;
     }
-    for (const group of groups) root.append(renderGroup(group));
+    for (const group of groups.filter((group) => !group.merged)) root.append(renderGroup(group));
     if (!groups.some((group) => !group.main)) root.append(el("p", "message", "Aucun worktree. Dans une conversation : /worktree <branche>."));
+    const archived = groups.filter((group) => group.merged);
+    if (archived.length > 0) root.append(renderArchive(archived));
+  }
+
+  function renderArchive(groups) {
+    const section = el("section", "archive");
+    if (state.archiveCollapsed !== false) section.classList.add("collapsed");
+    const header = el("header", "archive-header");
+    header.append(el("span", "chevron"), el("span", "name", "Archivés"), el("span", "count", String(groups.length)));
+    header.title = "Worktrees dont la branche est déjà fusionnée dans la branche par défaut";
+    header.addEventListener("click", () => {
+      state.archiveCollapsed = !section.classList.toggle("collapsed") ? false : true;
+      vscode.setState(state);
+    });
+    const list = el("div", "archived");
+    for (const group of groups) list.append(renderGroup(group));
+    section.append(header, list);
+    return section;
   }
 
   function renderHeader(running, update, refreshedAt) {
@@ -87,7 +105,7 @@
   }
 
   function renderGroup(group) {
-    const section = el("section", group.main ? `group main ${group.state}` : `group ${group.state}`);
+    const section = el("section", `group ${group.state}${group.main ? " main" : ""}${group.merged ? " merged" : ""}`);
     section.dataset.path = group.path;
     section.style.setProperty("--wt-accent-hue", String(hue(group.branch)));
     if (state.collapsed[group.path]) section.classList.add("collapsed");
@@ -98,8 +116,10 @@
     if (group.main) header.append(el("span", "tag", "current"));
     if (group.state === "taken") header.append(el("span", "tag state", "sur current"));
     if (group.state === "detached") header.append(el("span", "tag state", "détaché"));
-    if (!group.main && group.state === "owned") header.append(action("Aller", "Committe le travail non committé du worktree sur " + group.branch + " (commit \"wip\"), puis git switch " + group.branch + " sur current ; le worktree reste sur les mêmes fichiers, détaché", "goto", group));
-    if (!group.main && group.state === "taken") header.append(action("Revenir", "Committe les modifs de current sur " + group.branch + " (commit \"wip\"), current revient sur sa branche précédente, le worktree reprend " + group.branch + " et les commits \"wip\" sont défaits : le travail redevient non committé", "giveBack", group));
+    if (group.merged) header.append(el("span", "tag", "fusionnée"));
+    const active = !group.main && !group.merged;
+    if (active && group.state === "owned") header.append(action("Aller", "Committe le travail non committé du worktree sur " + group.branch + " (commit \"wip\"), puis git switch " + group.branch + " sur current ; le worktree reste sur les mêmes fichiers, détaché", "goto", group));
+    if (active && group.state === "taken") header.append(action("Revenir", "Committe les modifs de current sur " + group.branch + " (commit \"wip\"), current revient sur sa branche précédente, le worktree reprend " + group.branch + " et les commits \"wip\" sont défaits : le travail redevient non committé", "giveBack", group));
     section.append(header);
     if (transitions[group.path]) section.append(renderTransition(transitions[group.path]));
     if (group.main) return section;
@@ -109,8 +129,8 @@
       changes.title = "Fichiers modifiés ou nouveaux, non committés, dans le worktree";
       header.append(changes);
     }
-    if (!group.main && group.state === "taken" && group.changes > 0) header.append(action("Synchroniser", "Committe les nouvelles modifs du worktree (commit \"wip\") et les amène sur " + group.branch + " dans current, sans quitter la branche", "sync", group));
-    if (!group.main) header.append(action("+", "Nouvelle conversation Claude dans ce worktree : ouvre un onglet ici et lance /worktree " + group.branch, "newSession", group));
+    if (active && group.state === "taken" && group.changes > 0) header.append(action("Synchroniser", "Committe les nouvelles modifs du worktree (commit \"wip\") et les amène sur " + group.branch + " dans current, sans quitter la branche", "sync", group));
+    if (active) header.append(action("+", "Nouvelle conversation Claude dans ce worktree : ouvre un onglet ici et lance /worktree " + group.branch, "newSession", group));
     header.append(el("span", "count", String(group.sessions.length)));
     header.addEventListener("click", () => {
       state.collapsed[group.path] = !state.collapsed[group.path];
@@ -135,13 +155,15 @@
     const meta = el("span", "meta");
     meta.append(time);
     if (session.branch && session.branch !== group.branch) meta.append(el("span", "branch", session.branch));
-    const window = el("button", "icon", "↗");
-    window.title = "Ouvrir cette conversation dans une nouvelle fenêtre VSCodium sur le worktree";
-    window.addEventListener("click", (event) => {
-      event.stopPropagation();
-      vscode.postMessage({ type: "openInWindow", session });
-    });
-    meta.append(window);
+    if (group.state === "owned") {
+      const window = el("button", "icon", "↗");
+      window.title = "Ouvrir cette conversation dans une nouvelle fenêtre VSCodium sur le worktree";
+      window.addEventListener("click", (event) => {
+        event.stopPropagation();
+        vscode.postMessage({ type: "openInWindow", session });
+      });
+      meta.append(window);
+    }
     item.append(el("span", "title", session.title), meta);
     const open = () => vscode.postMessage({ type: "open", session });
     item.addEventListener("click", open);

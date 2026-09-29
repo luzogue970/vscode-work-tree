@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
 import { listSessions, mirrorTranscripts, type Session } from "./claude";
-import { countChanges, listBranches, listWorktrees } from "./git";
+import { countChanges, isMerged, listBranches, listWorktrees, mergeTarget } from "./git";
 
 export interface Target {
   path: string;
@@ -17,6 +17,7 @@ interface Group extends Target {
   main: boolean;
   state: GroupState;
   changes: number;
+  merged: boolean;
   sessions: Session[];
 }
 
@@ -138,12 +139,14 @@ async function buildGroups(root: string): Promise<Group[]> {
   const worktrees = await listWorktrees(root);
   const branches = await listBranches(root);
   const mainBranch = worktrees[0]?.branch;
+  const target = await mergeTarget(root);
   const groups: Group[] = await Promise.all(worktrees.map(async (tree) => {
     const name = path.basename(tree.path);
     const branch = tree.branch ?? branches.find((candidate) => candidate.replaceAll("/", "-") === name);
     const state: GroupState = tree.branch ? "owned" : branch !== undefined && branch === mainBranch ? "taken" : "detached";
     const changes = tree.main ? 0 : await countChanges(tree.path);
-    return { name, branch: branch ?? "(détaché)", path: tree.path, main: tree.main, state, changes, sessions: [] };
+    const merged = !tree.main && branch !== undefined && (await isMerged(root, branch, target));
+    return { name, branch: branch ?? "(détaché)", path: tree.path, main: tree.main, state, changes, merged, sessions: [] };
   }));
   const linked = groups.filter((group) => !group.main).sort((a, b) => b.path.length - a.path.length);
   const sessions = await listSessions(linked.map((group) => group.path));
