@@ -55,7 +55,7 @@
   }
 
   function renderGroup(group) {
-    const section = el("section", "group");
+    const section = el("section", `group ${group.state}`);
     section.style.setProperty("--wt-accent-hue", String(hue(group.branch)));
     if (state.collapsed[group.path]) section.classList.add("collapsed");
 
@@ -63,6 +63,10 @@
     header.title = group.path;
     header.append(el("span", "chevron"), el("span", "name", group.name), el("span", "branch", group.branch));
     if (group.main) header.append(el("span", "tag", "principal"));
+    if (group.state === "taken") header.append(el("span", "tag state", "tenue par le principal"));
+    if (group.state === "detached") header.append(el("span", "tag state", "détaché"));
+    if (!group.main && group.state === "owned") header.append(action("Aller", "git switch " + group.branch + " dans le checkout principal ; ce worktree passe en détaché", "goto", group));
+    if (!group.main && group.state === "taken") header.append(action("Rendre", "Rend " + group.branch + " à ce worktree ; le checkout principal revient sur sa branche précédente", "giveBack", group));
     header.append(el("span", "count", String(group.sessions.length)));
     header.addEventListener("click", () => {
       state.collapsed[group.path] = !state.collapsed[group.path];
@@ -94,6 +98,16 @@
       if (event.key === "Enter") open();
     });
     return item;
+  }
+
+  function action(label, title, type, group) {
+    const button = el("button", "action", label);
+    button.title = title;
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      vscode.postMessage({ type, target: { path: group.path, branch: group.branch } });
+    });
+    return button;
   }
 
   function hue(text) {

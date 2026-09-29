@@ -20,6 +20,8 @@
   --wt-button-background: var(--vscode-button-secondaryBackground);
   --wt-button-foreground: var(--vscode-button-secondaryForeground);
   --wt-button-hover: var(--vscode-button-secondaryHoverBackground);
+  --wt-warning: var(--vscode-editorWarning-foreground);
+  --wt-warning-soft-alpha: 0.18;
   --wt-accent-saturation: 70%;
   --wt-accent-lightness: 58%;
   --wt-accent-soft-alpha: 0.18;
@@ -117,6 +119,34 @@ body.loading .hub-header .status {
   color: var(--wt-tag-foreground);
   font-size: 0.75em;
   font-weight: 500;
+  white-space: nowrap;
+}
+
+.group.taken,
+.group.detached {
+  --wt-accent: var(--wt-warning);
+  --wt-accent-soft: color-mix(in srgb, var(--wt-warning) calc(var(--wt-warning-soft-alpha) * 100%), transparent);
+}
+
+.tag.state {
+  background: var(--wt-accent-soft);
+  color: var(--wt-accent);
+}
+
+.action {
+  padding: 1px 8px;
+  border: 1px solid var(--wt-accent);
+  border-radius: var(--wt-radius);
+  background: transparent;
+  color: var(--wt-accent);
+  font: inherit;
+  font-size: 0.8em;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--wt-accent-soft);
 }
 
 .hub-header .update {

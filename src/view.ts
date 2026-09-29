@@ -3,13 +3,19 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
 import { listSessions, type Session } from "./claude";
-import { listWorktrees } from "./git";
+import { listBranches, listWorktrees } from "./git";
 
-interface Group {
-  name: string;
-  branch: string;
+export interface Target {
   path: string;
+  branch: string;
+}
+
+type GroupState = "owned" | "taken" | "detached";
+
+interface Group extends Target {
+  name: string;
   main: boolean;
+  state: GroupState;
   sessions: Session[];
 }
 
@@ -18,7 +24,7 @@ interface Payload {
   error?: string;
 }
 
-type Incoming = { type: "ready" } | { type: "refresh" } | { type: "update" } | { type: "open"; id: string };
+type Incoming = { type: "ready" } | { type: "refresh" } | { type: "update" } | { type: "open"; id: string } | { type: "goto"; target: Target } | { type: "giveBack"; target: Target };
 
 export class WorktreesView implements vscode.WebviewViewProvider {
   static readonly id = "worktreeHub.view";
@@ -36,6 +42,8 @@ export class WorktreesView implements vscode.WebviewViewProvider {
       if (message.type === "ready" || message.type === "refresh") void this.refresh(true);
       if (message.type === "open") void vscode.commands.executeCommand("claude-vscode.editor.open", message.id);
       if (message.type === "update") void vscode.commands.executeCommand("worktreeHub.update");
+      if (message.type === "goto") void vscode.commands.executeCommand("worktreeHub.goto", message.target);
+      if (message.type === "giveBack") void vscode.commands.executeCommand("worktreeHub.giveBack", message.target);
     });
     view.onDidChangeVisibility(() => {
       if (view.visible) void this.refresh();
@@ -91,7 +99,14 @@ async function load(): Promise<Payload> {
 
 async function buildGroups(root: string): Promise<Group[]> {
   const worktrees = await listWorktrees(root);
-  const groups: Group[] = worktrees.map((tree) => ({ name: path.basename(tree.path), branch: tree.branch, path: tree.path, main: tree.main, sessions: [] }));
+  const branches = await listBranches(root);
+  const mainBranch = worktrees[0]?.branch;
+  const groups: Group[] = worktrees.map((tree) => {
+    const name = path.basename(tree.path);
+    const branch = tree.branch ?? branches.find((candidate) => candidate.replaceAll("/", "-") === name);
+    const state: GroupState = tree.branch ? "owned" : branch !== undefined && branch === mainBranch ? "taken" : "detached";
+    return { name, branch: branch ?? "(détaché)", path: tree.path, main: tree.main, state, sessions: [] };
+  });
   const byDepth = [...groups].sort((a, b) => b.path.length - a.path.length);
   for (const session of await listSessions(worktrees.map((tree) => tree.path))) {
     const group = byDepth.find((candidate) => session.cwd === candidate.path || session.cwd.startsWith(candidate.path + path.sep));
