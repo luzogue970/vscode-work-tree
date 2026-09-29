@@ -118,8 +118,8 @@
     if (group.state === "detached") header.append(el("span", "tag state", "détaché"));
     if (group.merged) header.append(el("span", "tag", "fusionnée"));
     const active = !group.main && !group.merged;
-    if (active && group.state === "owned") header.append(action("Aller", "Committe le travail non committé du worktree sur " + group.branch + " (commit \"wip\"), puis git switch " + group.branch + " sur current ; le worktree reste sur les mêmes fichiers, détaché", "goto", group));
-    if (active && group.state === "taken") header.append(action("Revenir", "Committe les modifs de current sur " + group.branch + " (commit \"wip\"), current revient sur sa branche précédente, le worktree reprend " + group.branch + " et les commits \"wip\" sont défaits : le travail redevient non committé", "giveBack", group));
+    if (active && group.state === "owned") header.append(action("Aller", "git switch " + group.branch + " sur current, le travail non committé du worktree y arrive indexé (staged), sans commit sur la branche ; le worktree garde ses fichiers, détaché", "goto", group));
+    if (active && group.state === "taken") header.append(action("Revenir", "Synchronise ce qui reste du worktree, current revient sur sa branche précédente, le worktree reprend " + group.branch + " avec tout le travail non committé (le sien et celui fait sur current)", "giveBack", group));
     section.append(header);
     if (transitions[group.path]) section.append(renderTransition(transitions[group.path]));
     if (group.main) return section;
@@ -129,7 +129,7 @@
       changes.title = "Fichiers modifiés ou nouveaux, non committés, dans le worktree";
       header.append(changes);
     }
-    if (active && group.state === "taken" && group.changes > 0) header.append(action("Synchroniser", "Committe les nouvelles modifs du worktree (commit \"wip\") et les amène sur " + group.branch + " dans current, sans quitter la branche", "sync", group));
+    if (active && group.state === "taken" && group.changes > 0) header.append(action("Synchroniser", "Amène les nouvelles modifs du worktree sur current, indexées (staged), sans commit sur " + group.branch, "sync", group));
     if (active) header.append(action("+", "Nouvelle conversation Claude dans ce worktree : ouvre un onglet ici et lance /worktree " + group.branch, "newSession", group));
     header.append(el("span", "count", String(group.sessions.length)));
     header.addEventListener("click", () => {

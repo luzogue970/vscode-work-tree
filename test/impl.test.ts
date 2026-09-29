@@ -169,8 +169,10 @@ describe("branch transfer from the view", () => {
 
     const goto = await transition(f.view, { type: "goto", target });
     assert.equal(goto.status, "done");
-    assert.match(goto.lines.join("\n"), /Commit "wip" créé sur feat\/x[\s\S]*git switch feat\/x/);
+    assert.match(goto.lines.join("\n"), /git switch feat\/x[\s\S]*staged/);
     assert.equal(git(f.root, "branch", "--show-current"), "feat/x");
+    assert.equal(git(f.root, "log", "-1", "--format=%s"), "commit on feat/x");
+    assert.equal(git(f.root, "diff", "--cached", "--name-only"), "n");
     assert.equal(groups(f.view)[1].state, "taken");
     assert.equal(f.context.workspaceState.get("previous:feat/x"), "main");
     assert.ok(messages.length === 0);
@@ -181,13 +183,17 @@ describe("branch transfer from the view", () => {
     const sync = await transition(f.view, { type: "sync", target });
     assert.equal(sync.status, "done");
     assert.equal(readFileSync(path.join(f.root, "bg"), "utf8"), "background work");
+    assert.deepEqual(git(f.root, "diff", "--cached", "--name-only").split("\n"), ["bg", "n"]);
+    assert.equal(git(f.root, "log", "-1", "--format=%s"), "commit on feat/x");
+    assert.equal(groups(f.view)[1].changes, 0);
 
     const back = await transition(f.view, { type: "giveBack", target });
     assert.equal(back.status, "done");
-    assert.match(back.lines.join("\n"), /2 commit\(s\) "wip" défait\(s\)/);
+    assert.match(back.lines.join("\n"), /1 commit\(s\) "wip" défait\(s\)/);
     assert.equal(git(f.root, "branch", "--show-current"), "main");
     assert.equal(groups(f.view)[1].state, "owned");
     assert.match(git(f.worktree, "status", "--porcelain"), /\?\? bg/);
+    assert.match(git(f.worktree, "status", "--porcelain"), /\?\? n/);
   });
 
   test("a refused goto ends in error, shows it and leaves git untouched", async () => {

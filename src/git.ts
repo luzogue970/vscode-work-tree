@@ -47,8 +47,12 @@ export async function snapshot(cwd: string, label: string, includeUntracked: boo
   const { stdout } = await git(cwd, "status", "--porcelain", includeUntracked ? "--untracked-files=all" : "--untracked-files=no");
   if (!stdout.trim()) return false;
   await git(cwd, "add", includeUntracked ? "-A" : "-u");
-  await git(cwd, "commit", "-q", "-m", "wip", "-m", `${snapshotTrailer}: ${label}`);
+  await commitSnapshot(cwd, label);
   return true;
+}
+
+async function commitSnapshot(cwd: string, label: string): Promise<void> {
+  await git(cwd, "commit", "-q", "--no-verify", "-m", "wip", "-m", `${snapshotTrailer}: ${label}`);
 }
 
 export async function unwindSnapshots(cwd: string): Promise<number> {
@@ -66,8 +70,8 @@ export async function moveBranchToMain(main: string, worktree: string, branch: s
   const name = path.basename(worktree);
   log(`Recherche de travail non committé dans ${name}`);
   const saved = await snapshot(worktree, name, true);
-  log(saved ? `Commit "wip" créé sur ${branch}` : "Rien à committer");
-  log(`Détachement du worktree : git switch --detach`);
+  log(saved ? "Travail mis de côté dans un commit wip temporaire" : "Rien à transférer");
+  log("Détachement du worktree : git switch --detach");
   await git(worktree, "switch", "--detach");
   log(`Sur current : git switch ${branch}`);
   try {
@@ -78,15 +82,25 @@ export async function moveBranchToMain(main: string, worktree: string, branch: s
     await unwindSnapshots(worktree);
     throw error;
   }
+  if (saved) {
+    await git(main, "reset", "-q", "--soft", "HEAD~1");
+    log(`Travail du worktree indexé (staged) sur current, ${branch} reste sur son dernier vrai commit`);
+  }
   return saved;
 }
 
 export async function moveBranchToWorktree(main: string, worktree: string, branch: string, mainBranch: string, log: Log): Promise<number> {
-  log("Recherche de modifications non committées sur current");
+  await syncToMain(main, worktree, log);
+  log("Recherche de modifications sur current");
   const saved = await snapshot(main, "current", false);
-  log(saved ? `Commit "wip" créé sur ${branch}` : "Rien à committer");
+  log(saved ? `Modifications de current mises de côté dans un commit wip sur ${branch}` : "Rien à mettre de côté sur current");
   log(`Sur current : git switch ${mainBranch}`);
-  await git(main, "switch", mainBranch);
+  try {
+    await git(main, "switch", mainBranch);
+  } catch (error) {
+    if (saved) await git(main, "reset", "-q", "--soft", "HEAD~1");
+    throw error;
+  }
   log(`Dans le worktree : git switch ${branch}`);
   await git(worktree, "switch", branch);
   const unwound = await unwindSnapshots(worktree);
@@ -123,29 +137,24 @@ export async function countChanges(cwd: string): Promise<number> {
   return stdout.split("\n").filter(Boolean).length;
 }
 
-export async function syncToMain(main: string, worktree: string, branch: string, log: Log): Promise<boolean> {
+export async function syncToMain(main: string, worktree: string, log: Log): Promise<boolean> {
   const name = path.basename(worktree);
-  log(`Recherche de travail non committé dans ${name}`);
-  if (!(await snapshot(worktree, name, true))) {
+  log(`Recherche de nouvelles modifications dans ${name}`);
+  await git(worktree, "add", "-A");
+  const files = (await git(worktree, "diff", "--cached", "--name-only")).stdout.split("\n").filter(Boolean);
+  if (files.length === 0) {
     log("Rien de nouveau à synchroniser");
     return false;
   }
-  const sha = (await git(worktree, "rev-parse", "HEAD")).stdout.trim();
-  log(`Commit "wip" ${sha.slice(0, 7)} créé, intégration sur current`);
+  log(`${files.length} fichier(s) à amener sur current : git apply --index`);
   try {
-    await git(main, "merge", "--ff-only", sha);
-    log(`Avance rapide de ${branch}`);
-  } catch {
-    log(`Avance rapide impossible (${branch} a avancé sur current), cherry-pick`);
-    try {
-      await git(main, "cherry-pick", sha);
-    } catch (error) {
-      await git(main, "cherry-pick", "--abort").catch(() => undefined);
-      throw error;
-    }
+    await gitWithInput(main, (await git(worktree, "diff", "--cached", "--binary")).stdout, "apply", "--index");
+  } catch (error) {
+    await git(worktree, "reset", "-q");
+    throw error;
   }
-  log(`Le worktree se réaligne sur ${branch} (détaché)`);
-  await git(worktree, "switch", "--detach", branch);
+  await commitSnapshot(worktree, `${name} sync`);
+  log("Modifications indexées (staged) sur current ; repère posé dans le worktree, hors branche");
   return true;
 }
 
@@ -154,6 +163,15 @@ export function gitError(error: unknown): string {
   return stderr || String(error);
 }
 
+const maxOutput = 512 * 1024 * 1024;
+
 function git(cwd: string, ...args: string[]): Promise<{ stdout: string; stderr: string }> {
-  return run("git", args, { cwd });
+  return run("git", args, { cwd, maxBuffer: maxOutput });
+}
+
+function gitWithInput(cwd: string, input: string, ...args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = execFile("git", args, { cwd, maxBuffer: maxOutput }, (error, _stdout, stderr) => (error ? reject(Object.assign(error, { stderr })) : resolve()));
+    child.stdin?.end(input);
+  });
 }
