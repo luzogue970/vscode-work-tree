@@ -2,7 +2,7 @@
   "name": "worktree-hub",
   "displayName": "Worktree Hub",
   "description": "Conversations Claude Code groupées par worktree git, un clic pour ouvrir la conversation.",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "publisher": "mathieulp",
   "private": true,
   "engines": {
