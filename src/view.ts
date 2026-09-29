@@ -24,30 +24,42 @@ interface Payload {
   error?: string;
 }
 
-type Incoming = { type: "ready" } | { type: "refresh" } | { type: "update" } | { type: "open"; id: string } | { type: "goto"; target: Target } | { type: "giveBack"; target: Target };
+type Incoming = { type: "ready" } | { type: "refresh" } | { type: "update" } | { type: "open"; session: Session } | { type: "goto"; target: Target } | { type: "giveBack"; target: Target };
 
-export class WorktreesView implements vscode.WebviewViewProvider {
+export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly id = "worktreeHub.view";
   private view: vscode.WebviewView | undefined;
   private update: Build | undefined;
   private lastPosted = "";
+  private readonly listeners: vscode.Disposable[] = [];
 
   constructor(private readonly media: vscode.Uri, private readonly running: Build) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
+    this.dispose();
     this.view = view;
+    this.lastPosted = "";
     view.webview.options = { enableScripts: true, localResourceRoots: [this.media] };
     view.webview.html = this.html(view.webview);
-    view.webview.onDidReceiveMessage((message: Incoming) => {
-      if (message.type === "ready" || message.type === "refresh") void this.refresh(true);
-      if (message.type === "open") void vscode.commands.executeCommand("claude-vscode.editor.open", message.id);
-      if (message.type === "update") void vscode.commands.executeCommand("worktreeHub.update");
-      if (message.type === "goto") void vscode.commands.executeCommand("worktreeHub.goto", message.target);
-      if (message.type === "giveBack") void vscode.commands.executeCommand("worktreeHub.giveBack", message.target);
-    });
-    view.onDidChangeVisibility(() => {
-      if (view.visible) void this.refresh();
-    });
+    this.listeners.push(
+      view.webview.onDidReceiveMessage((message: Incoming) => {
+        if (message.type === "ready" || message.type === "refresh") void this.refresh(true);
+        if (message.type === "open") void vscode.commands.executeCommand("worktreeHub.open", message.session);
+        if (message.type === "update") void vscode.commands.executeCommand("worktreeHub.update");
+        if (message.type === "goto") void vscode.commands.executeCommand("worktreeHub.goto", message.target);
+        if (message.type === "giveBack") void vscode.commands.executeCommand("worktreeHub.giveBack", message.target);
+      }),
+      view.onDidChangeVisibility(() => {
+        if (view.visible) void this.refresh();
+      }),
+      view.onDidDispose(() => {
+        if (this.view === view) this.view = undefined;
+      }),
+    );
+  }
+
+  dispose(): void {
+    for (const listener of this.listeners.splice(0)) listener.dispose();
   }
 
   setUpdate(update: Build | undefined): void {

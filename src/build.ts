@@ -2,15 +2,17 @@ import { readdir, readFile } from "node:fs/promises";
 import * as path from "node:path";
 
 export interface Build {
+  dir: string;
   version: string;
   builtAt: string;
+  contributes: string;
 }
 
 export async function readBuild(dir: string): Promise<Build | undefined> {
   try {
-    const pkg = JSON.parse(await readFile(path.join(dir, "package.json"), "utf8")) as { version: string };
+    const pkg = JSON.parse(await readFile(path.join(dir, "package.json"), "utf8")) as { version: string; contributes: unknown };
     const build = JSON.parse(await readFile(path.join(dir, "out", "build.json"), "utf8")) as { builtAt: string };
-    return { version: pkg.version, builtAt: build.builtAt };
+    return { dir, version: pkg.version, builtAt: build.builtAt, contributes: JSON.stringify(pkg.contributes) };
   } catch {
     return undefined;
   }

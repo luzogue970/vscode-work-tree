@@ -44,7 +44,9 @@
     refresh.addEventListener("click", () => vscode.postMessage({ type: "refresh" }));
     header.append(el("span", "version", `v${running.version}`), el("span", "built", `build ${formatDate(running.builtAt)}`), status, refresh);
     if (update) {
-      const button = el("button", "update", `Mettre à jour : v${update.version} du ${formatDate(update.builtAt)}`);
+      const hot = update.contributes === running.contributes;
+      const button = el("button", "update", `${hot ? "Charger à chaud" : "Mettre à jour (redémarrage)"} : v${update.version} du ${formatDate(update.builtAt)}`);
+      button.title = hot ? "Recharge l'extension sans toucher aux conversations Claude Code" : "Cette version change les contributions : redémarrage des extensions, avec confirmation";
       button.addEventListener("click", () => vscode.postMessage({ type: "update" }));
       header.append(button);
     }
@@ -92,7 +94,7 @@
     meta.append(time);
     if (session.branch && session.branch !== group.branch) meta.append(el("span", "branch", session.branch));
     item.append(el("span", "title", session.title), meta);
-    const open = () => vscode.postMessage({ type: "open", id: session.id });
+    const open = () => vscode.postMessage({ type: "open", session });
     item.addEventListener("click", open);
     item.addEventListener("keydown", (event) => {
       if (event.key === "Enter") open();

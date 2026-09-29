@@ -4,6 +4,7 @@ import * as path from "node:path";
 
 export interface Session {
   id: string;
+  file: string;
   title: string;
   cwd: string;
   branch: string;
@@ -55,6 +56,7 @@ async function readSession(file: string, size: number, modified: number): Promis
     if (prompt === undefined) return undefined;
     return {
       id: path.basename(file, ".jsonl"),
+      file,
       title: lastField(tail, "customTitle") ?? firstField(head, "customTitle") ?? lastField(tail, "aiTitle") ?? firstField(head, "aiTitle") ?? lastField(tail, "lastPrompt") ?? prompt,
       cwd: lastField(tail, "cwd") ?? lastField(tail, "relocatedCwd") ?? firstField(head, "cwd") ?? "",
       branch: lastField(tail, "gitBranch") ?? firstField(head, "gitBranch") ?? "",
