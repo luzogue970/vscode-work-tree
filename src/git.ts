@@ -104,14 +104,18 @@ export async function mergeTarget(cwd: string): Promise<string> {
   }
 }
 
+// A tip sitting on the target's first-parent line is a fresh or stale branch, not a merged one.
 export async function isMerged(cwd: string, branch: string, target: string): Promise<boolean> {
+  const track = (await git(cwd, "for-each-ref", "--format=%(upstream:track)", `refs/heads/${branch}`)).stdout.trim();
+  if (track === "[gone]") return true;
   try {
     await git(cwd, "merge-base", "--is-ancestor", branch, target);
   } catch {
     return false;
   }
-  const [tip, base] = await Promise.all([git(cwd, "rev-parse", branch), git(cwd, "rev-parse", target)]);
-  return tip.stdout !== base.stdout;
+  const tip = (await git(cwd, "rev-parse", branch)).stdout.trim();
+  const firstParents = (await git(cwd, "rev-list", "--first-parent", target)).stdout;
+  return !firstParents.includes(tip);
 }
 
 export async function countChanges(cwd: string): Promise<number> {
