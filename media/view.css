@@ -8,6 +8,11 @@
   --wt-hover-background: var(--vscode-list-hoverBackground);
   --wt-focus-border: var(--vscode-focusBorder);
   --wt-error: var(--vscode-errorForeground);
+  --wt-cta-background: var(--vscode-button-background);
+  --wt-cta-foreground: var(--vscode-button-foreground);
+  --wt-cta-hover: var(--vscode-button-hoverBackground);
+  --wt-cta-glow: var(--vscode-focusBorder);
+  --wt-info-font-size: 0.85em;
   --wt-accent-saturation: 70%;
   --wt-accent-lightness: 58%;
   --wt-accent-soft-alpha: 0.18;
@@ -26,6 +31,45 @@ body {
   font-family: var(--wt-font);
   font-size: var(--wt-font-size);
   color: var(--wt-foreground);
+}
+
+.hub-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 4px 12px 10px;
+  color: var(--wt-muted);
+  font-size: var(--wt-info-font-size);
+}
+
+.hub-header .version {
+  font-weight: 600;
+  color: var(--wt-foreground);
+}
+
+.hub-header .update {
+  flex-basis: 100%;
+  margin-top: 4px;
+  padding: 9px 10px;
+  border: none;
+  border-radius: var(--wt-radius);
+  background: var(--wt-cta-background);
+  color: var(--wt-cta-foreground);
+  font: inherit;
+  font-size: 1.05em;
+  font-weight: 600;
+  cursor: pointer;
+  animation: wt-pulse 1.6s ease-in-out infinite;
+}
+
+.hub-header .update:hover {
+  background: var(--wt-cta-hover);
+}
+
+@keyframes wt-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--wt-cta-glow); }
+  50% { box-shadow: 0 0 0 5px transparent; }
 }
 
 .message {

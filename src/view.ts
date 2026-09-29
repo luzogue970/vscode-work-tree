@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import type { Build } from "./build";
 import { listSessions, type Session } from "./claude";
 import { listWorktrees } from "./git";
 
@@ -11,13 +12,14 @@ interface Group {
   sessions: Session[];
 }
 
-type Incoming = { type: "ready" } | { type: "open"; id: string };
+type Incoming = { type: "ready" } | { type: "update" } | { type: "open"; id: string };
 
 export class WorktreesView implements vscode.WebviewViewProvider {
   static readonly id = "worktreeHub.view";
   private view: vscode.WebviewView | undefined;
+  private update: Build | undefined;
 
-  constructor(private readonly media: vscode.Uri) {}
+  constructor(private readonly media: vscode.Uri, private readonly running: Build) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -26,24 +28,35 @@ export class WorktreesView implements vscode.WebviewViewProvider {
     view.webview.onDidReceiveMessage((message: Incoming) => {
       if (message.type === "ready") void this.refresh();
       if (message.type === "open") void vscode.commands.executeCommand("claude-vscode.editor.open", message.id);
+      if (message.type === "update") void vscode.commands.executeCommand("worktreeHub.update");
     });
     view.onDidChangeVisibility(() => {
       if (view.visible) void this.refresh();
     });
   }
 
+  setUpdate(update: Build | undefined): void {
+    if (update?.builtAt === this.update?.builtAt) return;
+    this.update = update;
+    void this.refresh();
+  }
+
   async refresh(): Promise<void> {
     if (!this.view) return;
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) {
-      await this.view.webview.postMessage({ type: "data", groups: [], error: "Aucun dossier ouvert" });
+      await this.post({ groups: [], error: "Aucun dossier ouvert" });
       return;
     }
     try {
-      await this.view.webview.postMessage({ type: "data", groups: await buildGroups(root) });
+      await this.post({ groups: await buildGroups(root) });
     } catch (error) {
-      await this.view.webview.postMessage({ type: "data", groups: [], error: String(error) });
+      await this.post({ groups: [], error: String(error) });
     }
+  }
+
+  private async post(payload: { groups: Group[]; error?: string }): Promise<void> {
+    await this.view?.webview.postMessage({ type: "data", running: this.running, update: this.update, ...payload });
   }
 
   private html(webview: vscode.Webview): string {

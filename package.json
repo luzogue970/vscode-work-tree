@@ -40,20 +40,30 @@
         "command": "worktreeHub.refresh",
         "title": "Worktree Hub : rafraîchir",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "worktreeHub.update",
+        "title": "Worktree Hub : redémarrer les extensions pour charger la mise à jour",
+        "icon": "$(sync)"
       }
     ],
     "menus": {
       "view/title": [
         {
+          "command": "worktreeHub.update",
+          "when": "view == worktreeHub.view && worktreeHub.updateAvailable",
+          "group": "navigation@1"
+        },
+        {
           "command": "worktreeHub.refresh",
           "when": "view == worktreeHub.view",
-          "group": "navigation"
+          "group": "navigation@2"
         }
       ]
     }
   },
   "scripts": {
-    "build": "tsc -p .",
+    "build": "tsc -p . && node -e \"require('fs').writeFileSync('out/build.json', JSON.stringify({ builtAt: new Date().toISOString() }))\"",
     "watch": "tsc -w -p .",
     "package": "npm run build && vsce package --allow-missing-repository --skip-license -o worktree-hub.vsix",
     "install:codium": "npm run package && codium --install-extension worktree-hub.vsix"

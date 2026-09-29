@@ -5,11 +5,11 @@
   const hues = [210, 150, 30, 285, 0, 180, 60, 330];
 
   window.addEventListener("message", (event) => {
-    if (event.data.type === "data") render(event.data.groups, event.data.error);
+    if (event.data.type === "data") render(event.data);
   });
 
-  function render(groups, error) {
-    root.replaceChildren();
+  function render({ groups, error, running, update }) {
+    root.replaceChildren(renderHeader(running, update));
     if (error) {
       root.append(el("p", "message error", error));
       return;
@@ -19,6 +19,22 @@
       return;
     }
     for (const group of groups) root.append(renderGroup(group));
+  }
+
+  function renderHeader(running, update) {
+    const header = el("div", "hub-header");
+    header.append(el("span", "version", `v${running.version}`), el("span", "built", formatDate(running.builtAt)));
+    if (update) {
+      const button = el("button", "update", `Mettre à jour : v${update.version} du ${formatDate(update.builtAt)}`);
+      button.addEventListener("click", () => vscode.postMessage({ type: "update" }));
+      header.append(button);
+    }
+    return header;
+  }
+
+  function formatDate(iso) {
+    if (!iso) return "date de build inconnue";
+    return new Date(iso).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
   function renderGroup(group) {
