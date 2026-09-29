@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import * as path from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -40,7 +41,16 @@ export async function gitCommonDir(cwd: string): Promise<string> {
   return stdout.trim();
 }
 
-export async function moveBranchToMain(main: string, worktree: string, branch: string): Promise<void> {
+export async function snapshot(cwd: string, label: string, includeUntracked: boolean): Promise<boolean> {
+  const { stdout } = await git(cwd, "status", "--porcelain", includeUntracked ? "--untracked-files=all" : "--untracked-files=no");
+  if (!stdout.trim()) return false;
+  await git(cwd, "add", includeUntracked ? "-A" : "-u");
+  await git(cwd, "commit", "-q", "-m", `wip: snapshot from ${label}`);
+  return true;
+}
+
+export async function moveBranchToMain(main: string, worktree: string, branch: string): Promise<boolean> {
+  const saved = await snapshot(worktree, path.basename(worktree), true);
   await git(worktree, "switch", "--detach");
   try {
     await git(main, "switch", branch);
@@ -48,11 +58,14 @@ export async function moveBranchToMain(main: string, worktree: string, branch: s
     await git(worktree, "switch", branch);
     throw error;
   }
+  return saved;
 }
 
-export async function moveBranchToWorktree(main: string, worktree: string, branch: string, mainBranch: string): Promise<void> {
+export async function moveBranchToWorktree(main: string, worktree: string, branch: string, mainBranch: string): Promise<boolean> {
+  const saved = await snapshot(main, "current", false);
   await git(main, "switch", mainBranch);
   await git(worktree, "switch", branch);
+  return saved;
 }
 
 export function gitError(error: unknown): string {

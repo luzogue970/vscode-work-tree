@@ -99,12 +99,14 @@ async function moveBranch(context: vscode.ExtensionContext, view: WorktreesView,
   const previousKey = `previous:${target.branch}`;
   try {
     const main = (await listWorktrees(root))[0];
+    let saved: boolean;
     if (direction === "toMain") {
       await context.workspaceState.update(previousKey, main.branch);
-      await moveBranchToMain(main.path, target.path, target.branch);
+      saved = await moveBranchToMain(main.path, target.path, target.branch);
     } else {
-      await moveBranchToWorktree(main.path, target.path, target.branch, context.workspaceState.get<string>(previousKey) ?? (await defaultBranch(root)));
+      saved = await moveBranchToWorktree(main.path, target.path, target.branch, context.workspaceState.get<string>(previousKey) ?? (await defaultBranch(root)));
     }
+    if (saved) void vscode.window.showInformationMessage(`Worktree Hub : les modifications non committées ont été committées sur ${target.branch} (wip: snapshot).`);
   } catch (error) {
     void vscode.window.showErrorMessage(`Worktree Hub : ${gitError(error)}`);
   }
