@@ -29,6 +29,19 @@ Une conversation qui vit dans un worktree ne se rouvre pas depuis la fenêtre du
 (Claude Code ouvre une conversation vide à la place) : la vue le dit et propose d'ouvrir une
 fenêtre sur le worktree, où la conversation s'ouvre toute seule.
 
+## Tests
+
+`npm test` compile puis lance trois niveaux avec le runner de Node (`node --test`), sans dépendance :
+
+- unitaires : lecture des transcripts (`test/claude.test.ts`) et des builds installés (`test/build.test.ts`) ;
+- intégration : toutes les opérations git dans des dépôts jetables (`test/git.test.ts`) ;
+- fonctionnels : l'extension activée contre une API `vscode` simulée (`test/stubs/vscode.ts`),
+  messages du webview, transferts de branche, ouverture de conversations, rechargement à chaud
+  (`test/impl.test.ts`, `test/host.test.ts`).
+
+`npm run package` refuse d'empaqueter si un test échoue, et le hook `.githooks/pre-commit`
+(activé par `npm install` via `prepare`) lance `npm test` avant chaque commit.
+
 ## Développer
 
 - `npm run watch` dans un terminal, puis F5 : ouvre une fenêtre de développement sur gliphish

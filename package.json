@@ -2,7 +2,7 @@
   "name": "worktree-hub",
   "displayName": "Worktree Hub",
   "description": "Conversations Claude Code groupées par worktree git : ouvrir, créer, déplacer une branche vers current et synchroniser le travail.",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "publisher": "mathieulp",
   "private": true,
   "engines": {
@@ -66,9 +66,12 @@
     }
   },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
     "build": "tsc -p . && node -e \"require('fs').writeFileSync('out/build.json', JSON.stringify({ builtAt: new Date().toISOString() }))\"",
+    "build:test": "tsc -p tsconfig.test.json",
+    "test": "npm run build && npm run build:test && NODE_PATH=out-test/test/stubs node --test out-test/test/*.test.js",
     "watch": "tsc -w -p .",
-    "package": "npm run build && vsce package --allow-missing-repository --skip-license -o worktree-hub.vsix",
+    "package": "npm test && vsce package --allow-missing-repository --skip-license -o worktree-hub.vsix",
     "install:codium": "npm run package && codium --install-extension worktree-hub.vsix"
   },
   "devDependencies": {

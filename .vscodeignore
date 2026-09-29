@@ -1,7 +1,11 @@
 .vscode/**
+.githooks/**
 src/**
+test/**
+out-test/**
 node_modules/**
 tsconfig.json
+tsconfig.test.json
 .gitignore
 **/*.map
 *.vsix

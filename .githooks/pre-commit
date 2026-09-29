@@ -1,0 +1,4 @@
+#!/bin/sh
+# Git exports GIT_DIR/GIT_INDEX_FILE to hooks, which would redirect the throwaway repos of the tests.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX
+cd "$(git rev-parse --show-toplevel)" && npm test
