@@ -1,0 +1,182 @@
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import * as path from "node:path";
+import { before, describe, test } from "node:test";
+import { listSessions, mirrorTranscripts, projectDir, type Session } from "../src/claude";
+import { projectDirOf, tempDir, userLine, writeTranscript } from "./helpers";
+
+const main = "/work/main";
+const worktree = "/work/main/.claude/worktrees/feat-x";
+let configDir: string;
+
+before(() => {
+  configDir = tempDir("claude");
+  process.env.CLAUDE_CONFIG_DIR = configDir;
+});
+
+describe("projectDir", () => {
+  const cases = [
+    { name: "slashes become dashes", cwd: "/home/u/proj", want: "-home-u-proj" },
+    { name: "dots and underscores become dashes too", cwd: "/a/b.c_d", want: "-a-b-c-d" },
+  ];
+  for (const tc of cases) test(tc.name, () => assert.equal(projectDir(tc.cwd), path.join(configDir, "projects", tc.want)));
+});
+
+describe("listSessions reads one transcript", () => {
+  const cases: { name: string; lines: unknown[] | string; want?: Partial<Session>; titleStartsWith?: string; skipped?: boolean }[] = [
+    {
+      name: "custom title wins over everything",
+      lines: [userLine(main, "hello"), { type: "ai-title", aiTitle: "AI" }, { type: "custom-title", customTitle: "Custom" }, { type: "last-prompt", lastPrompt: "later" }],
+      want: { title: "Custom", cwd: main, branch: "main" },
+    },
+    {
+      name: "ai title wins over last prompt",
+      lines: [userLine(main, "hello"), { type: "last-prompt", lastPrompt: "later" }, { type: "ai-title", aiTitle: "AI" }],
+      want: { title: "AI" },
+    },
+    {
+      name: "last prompt wins over first prompt",
+      lines: [userLine(main, "hello"), { type: "last-prompt", lastPrompt: "later" }],
+      want: { title: "later" },
+    },
+    {
+      name: "first prompt strips tags",
+      lines: [userLine(main, "<command-name>/x</command-name> real prompt")],
+      titleStartsWith: "/x",
+    },
+    {
+      name: "first prompt is truncated to 80 chars",
+      lines: [userLine(main, "a".repeat(200))],
+      want: { title: "a".repeat(80) },
+    },
+    {
+      name: "array content uses its first text block",
+      lines: [userLine(main, [{ type: "tool_result", content: "x" }, { type: "text", text: "from array" }])],
+      want: { title: "from array" },
+    },
+    {
+      name: "later message cwd wins",
+      lines: [userLine(main, "a"), userLine(worktree, "b")],
+      want: { cwd: worktree },
+    },
+    {
+      name: "relocation after the last message wins",
+      lines: [userLine(main, "a"), { type: "relocated", relocatedCwd: worktree }],
+      want: { cwd: worktree },
+    },
+    {
+      name: "message after a relocation wins",
+      lines: [userLine(main, "a"), { type: "relocated", relocatedCwd: worktree }, userLine(main, "b")],
+      want: { cwd: main },
+    },
+    {
+      name: "escaped characters are decoded",
+      lines: [userLine("/work/dir with \"quotes\"", "a")],
+      want: { cwd: "/work/dir with \"quotes\"" },
+    },
+    {
+      name: "last branch wins",
+      lines: [userLine(main, "a", { gitBranch: "main" }), userLine(main, "b", { gitBranch: "feat/x" })],
+      want: { branch: "feat/x" },
+    },
+    {
+      name: "sidechain transcript is skipped",
+      lines: [userLine(main, "a", { isSidechain: true })],
+      skipped: true,
+    },
+    {
+      name: "transcript without user message is skipped",
+      lines: [{ type: "ai-title", aiTitle: "x" }],
+      skipped: true,
+    },
+    {
+      name: "tool result only user messages are skipped",
+      lines: [userLine(main, [{ type: "tool_result", content: "x" }])],
+      skipped: true,
+    },
+    {
+      name: "malformed lines are ignored",
+      lines: '{"type":"user" broken\n' + JSON.stringify(userLine(main, "ok")) + "\n",
+      want: { title: "ok" },
+    },
+    {
+      name: "big transcript reads the head and the tail",
+      lines: [userLine(main, "first"), ...Array.from({ length: 2000 }, () => userLine(main, "x".repeat(100))), userLine(worktree, "last", { gitBranch: "feat/x" }), { type: "ai-title", aiTitle: "Big" }],
+      want: { title: "Big", cwd: worktree, branch: "feat/x" },
+    },
+  ];
+  for (const [index, tc] of cases.entries()) {
+    test(tc.name, async () => {
+      const cwd = `/case/${index}`;
+      const file = writeTranscript(configDir, cwd, `id-${index}`, tc.lines);
+      const sessions = await listSessions([cwd]);
+      if (tc.skipped) {
+        assert.equal(sessions.length, 0);
+        return;
+      }
+      assert.equal(sessions.length, 1);
+      const session = sessions[0];
+      assert.equal(session.id, `id-${index}`);
+      assert.equal(session.file, file);
+      assert.equal(session.modified, statSync(file).mtimeMs);
+      if (tc.titleStartsWith !== undefined) assert.ok(session.title.startsWith(tc.titleStartsWith), session.title);
+      for (const [key, value] of Object.entries(tc.want ?? {})) assert.equal(session[key as keyof Session], value, key);
+    });
+  }
+});
+
+describe("listSessions over a project", () => {
+  test("missing project dir yields no session", async () => {
+    assert.deepEqual(await listSessions(["/nowhere/at/all"]), []);
+  });
+
+  test("sessions are sorted by modification time, newest first", async () => {
+    const cwd = "/sorted";
+    const older = writeTranscript(configDir, cwd, "older", [userLine(cwd, "old")]);
+    writeTranscript(configDir, cwd, "newer", [userLine(cwd, "new")]);
+    utimesSync(older, new Date(2020, 0, 1), new Date(2020, 0, 1));
+    assert.deepEqual((await listSessions([cwd])).map((session) => session.id), ["newer", "older"]);
+  });
+
+  test("duplicate cwds are scanned once", async () => {
+    const cwd = "/dup";
+    writeTranscript(configDir, cwd, "one", [userLine(cwd, "x")]);
+    assert.equal((await listSessions([cwd, cwd])).length, 1);
+  });
+
+  test("a transcript is re-read only when its mtime changes", async () => {
+    const cwd = "/cached";
+    const file = writeTranscript(configDir, cwd, "c", [userLine(cwd, "v1")]);
+    const first = (await listSessions([cwd]))[0];
+    const second = (await listSessions([cwd]))[0];
+    assert.equal(second, first);
+    writeFileSync(file, JSON.stringify(userLine(cwd, "v2")) + "\n");
+    utimesSync(file, new Date(2030, 0, 1), new Date(2030, 0, 1));
+    assert.equal((await listSessions([cwd]))[0].title, "v2");
+  });
+});
+
+describe("mirrorTranscripts", () => {
+  const cases = [
+    { name: "links a worktree transcript into the workspace project dir", prepare: () => undefined, wantLinked: 1, sameInode: true },
+    { name: "is idempotent", prepare: (root: string, file: string) => mirrorTranscripts([fake(file, root)], root), wantLinked: 0, sameInode: true },
+    { name: "keeps an unrelated file with the same name", prepare: (root: string, file: string) => { mkdirSync(projectDirOf(configDir, root), { recursive: true }); writeFileSync(path.join(projectDirOf(configDir, root), path.basename(file)), "other"); }, wantLinked: 0, sameInode: false },
+    { name: "ignores a transcript already in the workspace project dir", prepare: undefined, own: true, wantLinked: 0, sameInode: true },
+  ];
+  for (const [index, tc] of cases.entries()) {
+    test(tc.name, async () => {
+      const root = `/mirror/${index}`;
+      const source = tc.own ? root : `${root}/.claude/worktrees/feat-x`;
+      const file = writeTranscript(configDir, source, "m", [userLine(source, "x")]);
+      await tc.prepare?.(root, file);
+      assert.equal(await mirrorTranscripts([fake(file, root)], root), tc.wantLinked);
+      const mirror = path.join(projectDirOf(configDir, root), "m.jsonl");
+      assert.ok(existsSync(mirror));
+      assert.equal(statSync(mirror).ino === statSync(file).ino, tc.sameInode);
+    });
+  }
+});
+
+function fake(file: string, cwd: string): Session {
+  return { id: "m", file, title: "t", cwd, branch: "main", modified: 0 };
+}
