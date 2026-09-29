@@ -19,7 +19,15 @@ npm ci
 npm run install:codium
 ```
 
-Puis "Developer: Restart Extension Host" dans VSCodium.
+La vue détecte le nouveau build en moins de 5 s et propose "Charger à chaud" : `out/extension.js`
+reste un amorceur stable qui décharge l'implémentation (`out/impl.js` et ses modules) et recharge
+celle du build installé, sans redémarrer les extensions, donc sans couper les conversations Claude
+Code. Seul un build qui change `contributes` (commandes, vues, réglages) demande un vrai
+redémarrage, proposé avec confirmation.
+
+Une conversation qui vit dans un worktree ne se rouvre pas depuis la fenêtre du checkout principal
+(Claude Code ouvre une conversation vide à la place) : la vue le dit et propose d'ouvrir une
+fenêtre sur le worktree, où la conversation s'ouvre toute seule.
 
 ## Développer
 
