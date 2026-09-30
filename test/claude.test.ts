@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { before, describe, test } from "node:test";
-import { listSessions, mirrorTranscripts, projectDir, type Session } from "../src/claude";
-import { projectDirOf, tempDir, userLine, writeTranscript } from "./helpers";
+import { listRepoSessions, listSessions, liveSessions, mirrorTranscripts, projectDir, scanWorktreeEntries, type ScanState, type Session } from "../src/claude";
+import { enterWorktreeLine, projectDirOf, tempDir, userLine, writeTranscript } from "./helpers";
 
 const main = "/work/main";
 const worktree = "/work/main/.claude/worktrees/feat-x";
@@ -175,6 +175,121 @@ describe("listSessions over a project", () => {
   });
 });
 
+describe("resumeCwd", () => {
+  const cases = [
+    { name: "the last relocation decides where Claude Code resumes", lines: [userLine(worktree, "a"), { type: "relocated", relocatedCwd: main }, userLine(worktree, "b")], want: main },
+    { name: "without relocation it resumes in the first cwd", lines: [userLine(main, "a"), userLine(worktree, "b")], want: main },
+  ];
+  for (const [index, tc] of cases.entries()) {
+    test(tc.name, async () => {
+      const cwd = `/resume/${index}`;
+      writeTranscript(configDir, cwd, `r-${index}`, tc.lines);
+      assert.equal((await listSessions([cwd]))[0].resumeCwd, tc.want);
+    });
+  }
+});
+
+describe("listRepoSessions", () => {
+  test("reads the main project, its subdirectories and its worktrees, not other repos", async () => {
+    const root = "/repo/app";
+    writeTranscript(configDir, root, "in-main", [userLine(root, "x")]);
+    writeTranscript(configDir, `${root}/frontend`, "in-subdir", [userLine(root, "x")]);
+    writeTranscript(configDir, `${root}/.claude/worktrees/feat-x`, "in-worktree", [userLine(root, "x")]);
+    writeTranscript(configDir, "/repo/apple", "other-repo", [userLine("/repo/apple", "x")]);
+    assert.deepEqual((await listRepoSessions(root)).map((session) => session.id).sort(), ["in-main", "in-subdir", "in-worktree"]);
+  });
+
+  test("a missing projects dir yields nothing", async () => {
+    const saved = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = "/nowhere/config";
+    assert.deepEqual(await listRepoSessions("/repo/app"), []);
+    process.env.CLAUDE_CONFIG_DIR = saved;
+  });
+});
+
+describe("scanWorktreeEntries", () => {
+  const root = "/scan/repo";
+  const worktreeX = `${root}/.claude/worktrees/feat-x`;
+  const worktreeY = `${root}/.claude/worktrees/feat-y`;
+  const cases: { name: string; lines: unknown[]; want: string | undefined }[] = [
+    { name: "an EnterWorktree call by path binds the session", lines: [userLine(root, "a"), enterWorktreeLine({ path: worktreeX })], want: worktreeX },
+    { name: "an EnterWorktree call by name binds to .claude/worktrees/<name>", lines: [userLine(root, "a"), enterWorktreeLine({ name: "feat-y" })], want: worktreeY },
+    { name: "the last EnterWorktree call wins", lines: [userLine(root, "a"), enterWorktreeLine({ path: worktreeX }), enterWorktreeLine({ path: worktreeY })], want: worktreeY },
+    { name: "working in a worktree without EnterWorktree does not bind", lines: [userLine(worktreeX, "a")], want: undefined },
+    { name: "EnterWorktree quoted inside a message does not bind", lines: [userLine(root, 'I ran "name":"EnterWorktree","input":{"path":"/x"}')], want: undefined },
+  ];
+  for (const [index, tc] of cases.entries()) {
+    test(tc.name, async () => {
+      const cwd = `/scan/case-${index}`;
+      writeTranscript(configDir, cwd, `s-${index}`, tc.lines);
+      const state: ScanState = { offsets: {}, bindings: {} };
+      await scanWorktreeEntries(await listSessions([cwd]), root, state);
+      assert.equal(state.bindings[`s-${index}`], tc.want);
+    });
+  }
+
+  test("only the appended part is read, and a binding survives later lines", async () => {
+    const cwd = "/scan/incremental";
+    const file = writeTranscript(configDir, cwd, "inc", [userLine(root, "a"), enterWorktreeLine({ path: worktreeX })]);
+    const state: ScanState = { offsets: {}, bindings: {} };
+    assert.equal(await scanWorktreeEntries(await listSessions([cwd]), root, state), true);
+    const firstOffset = state.offsets[file];
+    assert.equal(firstOffset, statSync(file).size);
+    assert.equal(await scanWorktreeEntries(await listSessions([cwd]), root, state), false);
+    appendFileSync(file, JSON.stringify(userLine(root, "later, back in the main checkout")) + "\n");
+    utimesSync(file, new Date(2031, 0, 1), new Date(2031, 0, 1));
+    assert.equal(await scanWorktreeEntries(await listSessions([cwd]), root, state), true);
+    assert.ok(state.offsets[file] > firstOffset);
+    assert.equal(state.bindings.inc, worktreeX);
+  });
+
+  test("a line still being written is left for the next scan", async () => {
+    const cwd = "/scan/partial";
+    const file = writeTranscript(configDir, cwd, "part", [userLine(root, "a")]);
+    appendFileSync(file, JSON.stringify(enterWorktreeLine({ path: worktreeX })).slice(0, 40));
+    const state: ScanState = { offsets: {}, bindings: {} };
+    await scanWorktreeEntries(await listSessions([cwd]), root, state);
+    assert.equal(state.bindings.part, undefined);
+    appendFileSync(file, JSON.stringify(enterWorktreeLine({ path: worktreeX })).slice(40) + "\n");
+    utimesSync(file, new Date(2031, 0, 2), new Date(2031, 0, 2));
+    await scanWorktreeEntries(await listSessions([cwd]), root, state);
+    assert.equal(state.bindings.part, worktreeX);
+  });
+
+  test("a rewritten, shorter file is scanned again from the start", async () => {
+    const cwd = "/scan/rewritten";
+    const file = writeTranscript(configDir, cwd, "rw", [userLine(root, "x".repeat(500))]);
+    const state: ScanState = { offsets: {}, bindings: {} };
+    await scanWorktreeEntries(await listSessions([cwd]), root, state);
+    writeFileSync(file, [userLine(root, "a"), enterWorktreeLine({ path: worktreeY })].map((line) => JSON.stringify(line)).join("\n") + "\n");
+    utimesSync(file, new Date(2031, 0, 3), new Date(2031, 0, 3));
+    await scanWorktreeEntries(await listSessions([cwd]), root, state);
+    assert.equal(state.bindings.rw, worktreeY);
+  });
+});
+
+describe("liveSessions", () => {
+  test("keeps the sessions whose process is alive, with their cwd", async () => {
+    const saved = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = tempDir("live");
+    const dir = path.join(process.env.CLAUDE_CONFIG_DIR, "sessions");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: "alive", cwd: "/work/here" }));
+    writeFileSync(path.join(dir, "999999999.json"), JSON.stringify({ pid: 999999999, sessionId: "dead", cwd: "/work/gone" }));
+    writeFileSync(path.join(dir, "broken.json"), "{oops");
+    writeFileSync(path.join(dir, "1.key"), "not a session");
+    assert.deepEqual([...(await liveSessions()).entries()], [["alive", "/work/here"]]);
+    process.env.CLAUDE_CONFIG_DIR = saved;
+  });
+
+  test("no sessions dir means no live session", async () => {
+    const saved = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = "/nowhere/config";
+    assert.equal((await liveSessions()).size, 0);
+    process.env.CLAUDE_CONFIG_DIR = saved;
+  });
+});
+
 describe("mirrorTranscripts", () => {
   const cases = [
     { name: "links a worktree transcript into the workspace project dir", prepare: () => undefined, wantLinked: 1, sameInode: true },
@@ -197,5 +312,5 @@ describe("mirrorTranscripts", () => {
 });
 
 function fake(file: string, cwd: string): Session {
-  return { id: "m", file, title: "t", cwd, branch: "main", modified: 0 };
+  return { id: "m", file, size: 0, title: "t", cwd, resumeCwd: cwd, branch: "main", modified: 0 };
 }

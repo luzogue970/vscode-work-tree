@@ -58,6 +58,10 @@ export function userLine(cwd: string, content: unknown, extra: Record<string, un
   return { type: "user", cwd, gitBranch: "main", sessionId: "s", isSidechain: false, message: { role: "user", content }, ...extra };
 }
 
+export function enterWorktreeLine(input: { path?: string; name?: string }): Record<string, unknown> {
+  return { type: "assistant", sessionId: "s", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "EnterWorktree", input }] } };
+}
+
 export async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!condition()) {

@@ -1,33 +1,99 @@
-import { link, mkdir, open, readdir, stat, type FileHandle } from "node:fs/promises";
+import { link, mkdir, open, readdir, readFile, stat, type FileHandle } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
 export interface Session {
   id: string;
   file: string;
+  size: number;
   title: string;
   cwd: string;
+  resumeCwd: string;
   branch: string;
   modified: number;
+}
+
+export interface ScanState {
+  offsets: Record<string, number>;
+  bindings: Record<string, string>;
 }
 
 // Transcripts grow to tens of MB: only the first and last 64 KB are read.
 const chunkSize = 64 * 1024;
 const cache = new Map<string, { modified: number; session: Session | undefined }>();
+const enterWorktreeCall = /"name":"EnterWorktree","input":\{"(path|name)":"((?:[^"\\]|\\.)*)"/g;
+
+export function configDir(): string {
+  return process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
+}
 
 export function projectDir(cwd: string): string {
-  const configDir = process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
-  return path.join(configDir, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+  return path.join(configDir(), "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
 }
 
 export async function listSessions(cwds: string[]): Promise<Session[]> {
   const dirs = [...new Set(cwds.map(projectDir))];
-  const newest = new Map<string, Session>();
-  for (const session of (await Promise.all(dirs.map(readProject))).flat()) {
-    const known = newest.get(session.id);
-    if (!known || session.modified > known.modified) newest.set(session.id, session);
+  return newestById((await Promise.all(dirs.map(readProject))).flat());
+}
+
+export async function listRepoSessions(root: string): Promise<Session[]> {
+  const projects = path.join(configDir(), "projects");
+  const key = path.basename(projectDir(root));
+  let names: string[];
+  try {
+    names = await readdir(projects);
+  } catch {
+    return [];
   }
-  return [...newest.values()].sort((a, b) => b.modified - a.modified);
+  const dirs = names.filter((name) => name === key || name.startsWith(`${key}-`)).map((name) => path.join(projects, name));
+  return newestById((await Promise.all(dirs.map(readProject))).flat());
+}
+
+export async function scanWorktreeEntries(sessions: Session[], root: string, state: ScanState): Promise<boolean> {
+  let changed = false;
+  for (const session of sessions) {
+    const known = state.offsets[session.file] ?? 0;
+    const offset = session.size < known ? 0 : known;
+    if (session.size === offset) continue;
+    const handle = await open(session.file, "r");
+    let region: Buffer;
+    try {
+      region = Buffer.alloc(session.size - offset);
+      await handle.read(region, 0, region.length, offset);
+    } finally {
+      await handle.close();
+    }
+    const complete = region.lastIndexOf(0x0a) + 1;
+    state.offsets[session.file] = offset + complete;
+    for (const match of region.toString("utf8", 0, complete).matchAll(enterWorktreeCall)) {
+      const value = decode(match[2]);
+      const worktree = match[1] === "path" ? value : path.join(root, ".claude", "worktrees", value);
+      if (state.bindings[session.id] !== worktree) changed = true;
+      state.bindings[session.id] = worktree;
+    }
+    changed ||= complete > 0;
+  }
+  return changed;
+}
+
+export async function liveSessions(): Promise<Map<string, string>> {
+  const dir = path.join(configDir(), "sessions");
+  const live = new Map<string, string>();
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return live;
+  }
+  for (const name of names.filter((candidate) => candidate.endsWith(".json"))) {
+    try {
+      const entry = JSON.parse(await readFile(path.join(dir, name), "utf8")) as { pid?: number; sessionId?: string; cwd?: string };
+      if (entry.pid && entry.sessionId && entry.cwd && isAlive(entry.pid)) live.set(entry.sessionId, entry.cwd);
+    } catch {
+      continue;
+    }
+  }
+  return live;
 }
 
 // EnterWorktree moves the transcript away and the Claude Code list reads only the workspace dir (includeWorktrees: false).
@@ -46,6 +112,24 @@ export async function mirrorTranscripts(sessions: Session[], root: string): Prom
     }
   }
   return linked;
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function newestById(sessions: Session[]): Session[] {
+  const newest = new Map<string, Session>();
+  for (const session of sessions) {
+    const known = newest.get(session.id);
+    if (!known || session.modified > known.modified) newest.set(session.id, session);
+  }
+  return [...newest.values()].sort((a, b) => b.modified - a.modified);
 }
 
 async function readProject(dir: string): Promise<Session[]> {
@@ -79,9 +163,11 @@ async function readSession(file: string, size: number, modified: number): Promis
     return {
       id: path.basename(file, ".jsonl"),
       file,
+      size,
       title: lastField(tail, "customTitle") ?? firstField(head, "customTitle") ?? lastField(tail, "aiTitle") ?? firstField(head, "aiTitle") ?? lastField(tail, "lastPrompt") ?? prompt,
-      // "relocated" says where the transcript is filed (VS Code files it under the window's project), not where the session works.
       cwd: lastField(tail, "cwd") ?? lastField(tail, "relocatedCwd") ?? firstField(head, "cwd") ?? "",
+      // Claude Code resumes a session in its last "relocated" dir, falling back to the first cwd.
+      resumeCwd: lastField(tail, "relocatedCwd") ?? firstField(head, "cwd") ?? "",
       branch: lastField(tail, "gitBranch") ?? firstField(head, "gitBranch") ?? "",
       modified,
     };

@@ -1,11 +1,11 @@
 import { access } from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
-import type { Session } from "./claude";
-import { defaultBranch, gitCommonDir, gitError, listWorktrees, moveBranchToMain, moveBranchToWorktree, syncToMain, type Log } from "./git";
-import { WorktreesView, type Target } from "./view";
+import { configDir } from "./claude";
+import { defaultBranch, gitCommonDir, gitError, listWorktrees, moveCurrent, syncToMain, worktreeName, type Log } from "./git";
+import { StateStore } from "./state";
+import { WorktreesView, worksIn, type ListedSession, type Target } from "./view";
 
 export interface Loaded {
   resolve(view: vscode.WebviewView): void;
@@ -23,7 +23,7 @@ const pendingOpenKey = "pendingOpen";
 const claudeReadyMs = 1500;
 
 export async function activate(context: vscode.ExtensionContext, dir: string, running: Build): Promise<Loaded> {
-  const view = new WorktreesView(vscode.Uri.file(path.join(dir, "media")), running);
+  const view = new WorktreesView(vscode.Uri.file(path.join(dir, "media")), running, new StateStore(context.globalState));
   const refresh = debounce(() => void view.refresh(), 300);
   const watchers = (await watchPatterns()).map((pattern) => vscode.workspace.createFileSystemWatcher(pattern));
   for (const watcher of watchers) {
@@ -36,12 +36,18 @@ export async function activate(context: vscode.ExtensionContext, dir: string, ru
     ...watchers,
     { dispose: () => clearInterval(poll) },
     vscode.commands.registerCommand("worktreeHub.refresh", () => view.refresh(true)),
-    vscode.commands.registerCommand("worktreeHub.open", (session: Session) => openSession(session)),
-    vscode.commands.registerCommand("worktreeHub.openInWindow", (session: Session) => openInWindow(context, session)),
-    vscode.commands.registerCommand("worktreeHub.newSession", (target: Target) => vscode.commands.executeCommand("claude-vscode.editor.open", undefined, `/worktree ${target.branch}`)),
-    vscode.commands.registerCommand("worktreeHub.goto", (target: Target) => transition(view, target, (main, log) => moveBranchToMain(main.path, target.path, target.branch, log))),
-    vscode.commands.registerCommand("worktreeHub.gotoDefault", (target: Target) => transition(view, target, async (main, log) => moveBranchToWorktree(main.path, target.path, target.branch, await defaultBranch(main.path), log))),
-    vscode.commands.registerCommand("worktreeHub.sync", (target: Target) => transition(view, target, (main, log) => syncToMain(main.path, target.path, log))),
+    vscode.commands.registerCommand("worktreeHub.open", (session: ListedSession) => openSession(session)),
+    vscode.commands.registerCommand("worktreeHub.openInWindow", (session: ListedSession) => openInWindow(context, session)),
+    vscode.commands.registerCommand("worktreeHub.newSession", (target: Target) => prefill(`/worktree ${target.branch}`)),
+    vscode.commands.registerCommand("worktreeHub.mergeDefault", (target: Target) => prefill(`/worktree update ${target.branch}`)),
+    vscode.commands.registerCommand("worktreeHub.mergeDefaultAll", async (targets: Target[]) => {
+      for (const target of targets) await prefill(`/worktree update ${target.branch}`);
+    }),
+    vscode.commands.registerCommand("worktreeHub.goto", (target: Target) => goto(view, target)),
+    vscode.commands.registerCommand("worktreeHub.gotoDefault", (target: Target) => transition(view, target, async (root, log) => {
+      await moveCurrent(root, { branch: target.branch, worktree: target.path }, { branch: await defaultBranch(root) }, log);
+    })),
+    vscode.commands.registerCommand("worktreeHub.sync", (target: Target) => transition(view, target, (root, log) => syncToMain(root, target.path, log))),
   ];
   void openPending(context);
   return {
@@ -55,44 +61,63 @@ export async function activate(context: vscode.ExtensionContext, dir: string, ru
 }
 
 async function watchPatterns(): Promise<vscode.RelativePattern[]> {
-  const projects = vscode.Uri.file(path.join(process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"), "projects"));
-  const patterns = [new vscode.RelativePattern(projects, "**/*.jsonl")];
+  const patterns = [new vscode.RelativePattern(vscode.Uri.file(path.join(configDir(), "projects")), "**/*.jsonl"), new vscode.RelativePattern(vscode.Uri.file(path.join(configDir(), "sessions")), "*.json")];
   const root = workspaceRoot();
   const common = root ? await gitCommonDir(root).catch(() => undefined) : undefined;
-  if (common) patterns.push(new vscode.RelativePattern(vscode.Uri.file(common), "{HEAD,worktrees/**}"));
+  if (common) patterns.push(new vscode.RelativePattern(vscode.Uri.file(common), "{HEAD,worktrees/**,refs/**}"));
   return patterns;
 }
 
-async function transition(view: WorktreesView, target: Target, run: (main: { path: string; branch: string | undefined }, log: Log) => Promise<unknown>): Promise<void> {
+async function goto(view: WorktreesView, target: Target): Promise<void> {
+  const moved = await transition(view, target, async (root, log) => {
+    const trees = await listWorktrees(root);
+    const current = trees[0].branch;
+    if (!current) throw new Error("current n'est sur aucune branche (HEAD détaché) : rien n'a été déplacé");
+    const holder = trees.find((tree) => !tree.main && tree.branch === undefined && path.basename(tree.path) === worktreeName(current));
+    await moveCurrent(root, { branch: current, worktree: holder?.path }, { branch: target.branch, worktree: target.path }, log);
+  });
   const root = workspaceRoot();
-  if (!root) return;
+  if (!moved || !root || !target.session) return;
+  await openSession({ ...target.session, follow: worksIn(target.session.location, root, root) ? undefined : `/worktree here ${target.branch}` });
+}
+
+async function transition(view: WorktreesView, target: Target, run: (root: string, log: Log) => Promise<unknown>): Promise<boolean> {
+  const root = workspaceRoot();
+  if (!root) return false;
   const lines: string[] = [];
   const log: Log = (line) => {
     lines.push(line);
     view.transition(target.path, lines, "running");
   };
+  let succeeded = true;
   try {
-    await run((await listWorktrees(root))[0], log);
+    await run(root, log);
     view.transition(target.path, lines, "done");
   } catch (error) {
+    succeeded = false;
     lines.push(gitError(error));
     view.transition(target.path, lines, "error");
     void vscode.window.showErrorMessage(`Worktree Hub : ${gitError(error)}`);
   }
   await view.refresh(true);
+  return succeeded;
 }
 
-async function openSession(session: Session): Promise<void> {
+async function openSession(session: ListedSession): Promise<void> {
   if (!(await exists(session.file))) {
     void vscode.window.showErrorMessage(`Worktree Hub : transcript introuvable, la conversation n'existe plus (${session.file})`);
     return;
   }
-  await vscode.commands.executeCommand("claude-vscode.editor.open", session.id);
+  await vscode.commands.executeCommand("claude-vscode.editor.open", session.id, session.follow);
 }
 
-async function openInWindow(context: vscode.ExtensionContext, session: Session): Promise<void> {
-  await context.globalState.update(pendingOpenKey, { folder: session.cwd, id: session.id } satisfies PendingOpen);
-  await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(session.cwd), { forceNewWindow: true });
+async function prefill(prompt: string): Promise<void> {
+  await vscode.commands.executeCommand("claude-vscode.editor.open", undefined, prompt);
+}
+
+async function openInWindow(context: vscode.ExtensionContext, session: ListedSession): Promise<void> {
+  await context.globalState.update(pendingOpenKey, { folder: session.location, id: session.id } satisfies PendingOpen);
+  await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(session.location), { forceNewWindow: true });
 }
 
 async function openPending(context: vscode.ExtensionContext): Promise<void> {

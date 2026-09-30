@@ -2,23 +2,35 @@ import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
-import { listSessions, mirrorTranscripts, type Session } from "./claude";
-import { countChanges, defaultBranch, isMerged, listBranches, listWorktrees, mergeTarget } from "./git";
+import { listRepoSessions, liveSessions, mirrorTranscripts, projectDir, scanWorktreeEntries, type Session } from "./claude";
+import { behindCount, countChanges, defaultBranch, isMerged, listBranches, listWorktrees, mergeTarget, worktreeName } from "./git";
+import type { StateStore } from "./state";
 
 export interface Target {
   path: string;
   branch: string;
+  session?: ListedSession;
 }
 
-type GroupState = "owned" | "taken" | "detached";
+type GroupState = "owned" | "taken" | "detached" | "removed";
 
-interface Group extends Target {
+export interface ListedSession extends Session {
+  location: string;
+  live: boolean;
+  follow?: string;
+}
+
+interface Group {
   name: string;
+  branch: string;
+  path: string;
+  home: string;
   main: boolean;
   state: GroupState;
   changes: number;
   merged: boolean;
-  sessions: Session[];
+  behind: number;
+  sessions: ListedSession[];
 }
 
 interface Payload {
@@ -31,12 +43,14 @@ type Incoming =
   | { type: "ready" }
   | { type: "refresh" }
   | { type: "update" }
-  | { type: "open"; session: Session }
-  | { type: "openInWindow"; session: Session }
+  | { type: "open"; session: ListedSession }
+  | { type: "openInWindow"; session: ListedSession }
   | { type: "goto"; target: Target }
   | { type: "gotoDefault"; target: Target }
   | { type: "sync"; target: Target }
-  | { type: "newSession"; target: Target };
+  | { type: "newSession"; target: Target }
+  | { type: "mergeDefault"; target: Target }
+  | { type: "mergeDefaultAll"; targets: Target[] };
 
 const commands: Record<Exclude<Incoming["type"], "ready" | "refresh">, string> = {
   update: "worktreeHub.update",
@@ -46,6 +60,8 @@ const commands: Record<Exclude<Incoming["type"], "ready" | "refresh">, string> =
   gotoDefault: "worktreeHub.gotoDefault",
   sync: "worktreeHub.sync",
   newSession: "worktreeHub.newSession",
+  mergeDefault: "worktreeHub.mergeDefault",
+  mergeDefaultAll: "worktreeHub.mergeDefaultAll",
 };
 
 export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposable {
@@ -55,7 +71,7 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
   private lastPosted = "";
   private readonly listeners: vscode.Disposable[] = [];
 
-  constructor(private readonly media: vscode.Uri, private readonly running: Build) {}
+  constructor(private readonly media: vscode.Uri, private readonly running: Build, private readonly store: StateStore) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.dispose();
@@ -69,7 +85,7 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
           void this.refresh(true);
           return;
         }
-        const argument = "session" in message ? message.session : "target" in message ? message.target : undefined;
+        const argument = "session" in message ? message.session : "target" in message ? message.target : "targets" in message ? message.targets : undefined;
         void vscode.commands.executeCommand(commands[message.type], argument);
       }),
       view.onDidChangeVisibility(() => {
@@ -99,11 +115,21 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
     if (!this.view) return;
     const webview = this.view.webview;
     if (force) await webview.postMessage({ type: "loading" });
-    const payload = force ? await vscode.window.withProgress({ location: { viewId: WorktreesView.id } }, () => load()) : await load();
+    const payload = force ? await vscode.window.withProgress({ location: { viewId: WorktreesView.id } }, () => this.load()) : await this.load();
     const serialized = JSON.stringify(payload);
     if (!force && serialized === this.lastPosted) return;
     this.lastPosted = serialized;
     await webview.postMessage({ type: "data", running: this.running, update: this.update, refreshedAt: Date.now(), ...payload });
+  }
+
+  async load(): Promise<Payload> {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) return { groups: [], error: "Aucun dossier ouvert" };
+    try {
+      return { groups: await buildGroups(root, this.store), defaultBranch: await defaultBranch(root) };
+    } catch (error) {
+      return { groups: [], error: String(error) };
+    }
   }
 
   private html(webview: vscode.Webview): string {
@@ -126,35 +152,53 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
   }
 }
 
-async function load(): Promise<Payload> {
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) return { groups: [], error: "Aucun dossier ouvert" };
-  try {
-    return { groups: await buildGroups(root), defaultBranch: await defaultBranch(root) };
-  } catch (error) {
-    return { groups: [], error: String(error) };
-  }
+export function worksIn(location: string, home: string, root: string): boolean {
+  if (!isInside(location, home)) return false;
+  return home !== root || !isInside(location, path.join(root, ".claude", "worktrees"));
 }
 
-async function buildGroups(root: string): Promise<Group[]> {
+function isInside(location: string, dir: string): boolean {
+  return location === dir || location.startsWith(dir + path.sep);
+}
+
+async function buildGroups(root: string, store: StateStore): Promise<Group[]> {
+  const state = store.get(root);
   const worktrees = await listWorktrees(root);
   const branches = await listBranches(root);
   const mainBranch = worktrees[0]?.branch;
   const target = await mergeTarget(root);
   const groups: Group[] = await Promise.all(worktrees.map(async (tree) => {
     const name = path.basename(tree.path);
-    const branch = tree.branch ?? branches.find((candidate) => candidate.replaceAll("/", "-") === name);
+    const branch = tree.branch ?? branches.find((candidate) => worktreeName(candidate) === name);
     const state: GroupState = tree.branch ? "owned" : branch !== undefined && branch === mainBranch ? "taken" : "detached";
     const changes = tree.main ? 0 : await countChanges(tree.path);
     const merged = !tree.main && branch !== undefined && (await isMerged(root, branch, target));
-    return { name, branch: branch ?? "(détaché)", path: tree.path, main: tree.main, state, changes, merged, sessions: [] };
+    const behind = tree.main || merged || branch === undefined ? 0 : await behindCount(root, branch, target);
+    const home = state === "taken" ? root : tree.path;
+    return { name, branch: branch ?? "(détaché)", path: tree.path, home, main: tree.main, state, changes, merged, behind, sessions: [] };
   }));
-  const linked = groups.filter((group) => !group.main).sort((a, b) => b.path.length - a.path.length);
-  const sessions = await listSessions([root, ...linked.map((group) => group.path)]);
-  await mirrorTranscripts(sessions, root);
-  for (const session of sessions) {
-    const group = linked.find((candidate) => session.cwd === candidate.path || session.cwd.startsWith(candidate.path + path.sep));
-    group?.sessions.push(session);
+  for (const group of groups) if (!group.main && group.branch !== "(détaché)") state.worktrees[group.path] = group.branch;
+
+  const sessions = await listRepoSessions(root);
+  const scanned = await scanWorktreeEntries(sessions, root, state);
+  const live = await liveSessions();
+  const bound = sessions.filter((session) => state.bindings[session.id] !== undefined);
+  await mirrorTranscripts(bound.filter((session) => path.dirname(session.file) !== projectDir(root)), root);
+  for (const session of bound) {
+    const worktree = state.bindings[session.id];
+    const group = groups.find((candidate) => candidate.path === worktree) ?? removedGroup(groups, worktree, state.worktrees[worktree]);
+    if (!group) continue;
+    const location = live.get(session.id) ?? session.resumeCwd;
+    const follow = group.state === "removed" || worksIn(location, group.home, root) ? undefined : `/worktree here ${group.branch}`;
+    group.sessions.push({ ...session, location, live: live.has(session.id), follow });
   }
+  if (scanned) await store.save(root, state);
   return groups;
+}
+
+function removedGroup(groups: Group[], worktree: string, branch: string | undefined): Group | undefined {
+  if (branch === undefined) return undefined;
+  const group: Group = { name: path.basename(worktree), branch, path: worktree, home: worktree, main: false, state: "removed", changes: 0, merged: true, behind: 0, sessions: [] };
+  groups.push(group);
+  return group;
 }

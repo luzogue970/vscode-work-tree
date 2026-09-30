@@ -66,10 +66,21 @@
       root.append(el("p", "message error", error));
       return;
     }
+    const late = groups.filter((group) => !group.main && !group.merged && group.behind > 0);
+    if (late.length > 1) root.append(renderLate(late));
     for (const group of groups.filter((group) => !group.merged)) root.append(renderGroup(group));
     if (!groups.some((group) => !group.main)) root.append(el("p", "message", "Aucun worktree. Dans une conversation : /worktree <branche>."));
     const archived = groups.filter((group) => group.merged);
     if (archived.length > 0) root.append(renderArchive(archived));
+  }
+
+  function renderLate(groups) {
+    const box = el("div", "late");
+    const button = el("button", "action", `Mettre à jour les ${groups.length} worktrees en retard sur ${defaultBranch}`);
+    button.title = `Ouvre une conversation par worktree avec /worktree update <branche> pré-rempli : Entrée pour lancer le merge de ${defaultBranch}`;
+    button.addEventListener("click", () => vscode.postMessage({ type: "mergeDefaultAll", targets: groups.map((group) => ({ path: group.path, branch: group.branch })) }));
+    box.append(button);
+    return box;
   }
 
   function renderArchive(groups) {
@@ -77,7 +88,7 @@
     if (state.archiveCollapsed !== false) section.classList.add("collapsed");
     const header = el("header", "archive-header");
     header.append(el("span", "chevron"), el("span", "name", "Archivés"), el("span", "count", String(groups.length)));
-    header.title = "Worktrees dont la branche est déjà fusionnée dans la branche par défaut";
+    header.title = "Worktrees dont la branche est fusionnée ou qui n'existent plus, avec leurs conversations";
     header.addEventListener("click", () => {
       state.archiveCollapsed = !section.classList.toggle("collapsed") ? false : true;
       vscode.setState(state);
@@ -118,9 +129,10 @@
     if (group.main) header.append(el("span", "tag", "current"));
     if (group.state === "taken") header.append(el("span", "tag state", "sur current"));
     if (group.state === "detached") header.append(el("span", "tag state", "détaché"));
-    if (group.merged) header.append(el("span", "tag", "fusionnée"));
+    if (group.state === "removed") header.append(el("span", "tag", "supprimé"));
+    else if (group.merged) header.append(el("span", "tag", "fusionnée"));
     const active = !group.main && !group.merged;
-    if (active && group.state === "owned") header.append(action("Aller", "git switch " + group.branch + " sur current, le travail non committé du worktree y arrive indexé (staged), sans commit sur la branche ; le worktree garde ses fichiers, détaché", "goto", group));
+    if (active && group.state === "owned") header.append(action("Aller", `Échange : la branche de current retourne dans son worktree (ou son travail est garé), ${group.branch} arrive sur current avec le travail du worktree indexé, et sa conversation s'ouvre`, "goto", group));
     if (active && group.state === "taken") header.append(action(`Aller sur ${defaultBranch}`, `Synchronise ce qui reste du worktree, current passe sur ${defaultBranch}, le worktree reprend ${group.branch} avec tout le travail non committé (le sien et celui fait sur current)`, "gotoDefault", group));
     section.append(header);
     if (transitions[group.path]) section.append(renderTransition(transitions[group.path]));
@@ -132,6 +144,11 @@
       header.append(changes);
     }
     if (active && group.state === "taken" && group.changes > 0) header.append(action("Synchroniser", "Amène les nouvelles modifs du worktree sur current, indexées (staged), sans commit sur " + group.branch, "sync", group));
+    if (active && group.behind > 0) {
+      const late = el("span", "tag state late", `${group.behind} en retard sur ${defaultBranch}`);
+      late.title = `${group.behind} commit(s) de ${defaultBranch} absents de ${group.branch}`;
+      header.append(late, action("Mettre à jour", `Ouvre une conversation avec /worktree update ${group.branch} pré-rempli : Entrée pour lancer le merge de ${defaultBranch}, résolution des conflits comprise`, "mergeDefault", group));
+    }
     if (active) header.append(action("+", "Nouvelle conversation Claude dans ce worktree : ouvre un onglet ici et lance /worktree " + group.branch, "newSession", group));
     header.append(el("span", "count", String(group.sessions.length)));
     header.addEventListener("click", () => {
@@ -156,7 +173,12 @@
     time.dataset.ts = String(session.modified);
     const meta = el("span", "meta");
     meta.append(time);
-    if (session.branch && session.branch !== group.branch) meta.append(el("span", "branch", session.branch));
+    if (session.live) meta.append(el("span", "tag live", "en cours"));
+    if (session.follow) {
+      const away = el("span", "tag state", "hors de sa branche");
+      away.title = `À l'ouverture, "${session.follow}" sera pré-rempli pour la ramener là où est ${group.branch}`;
+      meta.append(away);
+    }
     if (group.state === "owned") {
       const window = el("button", "icon", "↗");
       window.title = "Ouvrir cette conversation dans une nouvelle fenêtre VSCodium sur le worktree";
@@ -180,7 +202,7 @@
     button.title = title;
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      vscode.postMessage({ type, target: { path: group.path, branch: group.branch } });
+      vscode.postMessage({ type, target: { path: group.path, branch: group.branch, session: group.sessions[0] } });
     });
     return button;
   }

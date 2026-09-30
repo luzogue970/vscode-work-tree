@@ -177,6 +177,20 @@ body.loading .hub-header .status {
   color: var(--wt-accent);
 }
 
+.tag.late {
+  --wt-accent: var(--wt-warning);
+  --wt-accent-soft: color-mix(in srgb, var(--wt-warning) calc(var(--wt-warning-soft-alpha) * 100%), transparent);
+}
+
+.tag.live {
+  background: color-mix(in srgb, var(--wt-success) 20%, transparent);
+  color: var(--wt-success);
+}
+
+.late {
+  padding: 0 12px 10px;
+}
+
 body.busy .action {
   pointer-events: none;
   opacity: var(--wt-busy-opacity);

@@ -10,6 +10,17 @@ export interface Worktree {
   main: boolean;
 }
 
+export interface Place {
+  branch: string;
+  worktree?: string;
+}
+
+export type Log = (line: string) => void;
+
+const snapshotTrailer = "Worktree-Hub-Snapshot";
+const parkPrefix = "worktree-hub:park:";
+const maxOutput = 512 * 1024 * 1024;
+
 export async function listWorktrees(cwd: string): Promise<Worktree[]> {
   const { stdout } = await git(cwd, "worktree", "list", "--porcelain");
   return stdout
@@ -20,6 +31,10 @@ export async function listWorktrees(cwd: string): Promise<Worktree[]> {
       const branch = lines.find((line) => line.startsWith("branch "))?.slice("branch refs/heads/".length);
       return { path: lines[0].slice("worktree ".length), branch, main: index === 0 };
     });
+}
+
+export function worktreeName(branch: string): string {
+  return branch.replaceAll("/", "-");
 }
 
 export async function listBranches(cwd: string): Promise<string[]> {
@@ -39,73 +54,6 @@ export async function defaultBranch(cwd: string): Promise<string> {
 export async function gitCommonDir(cwd: string): Promise<string> {
   const { stdout } = await git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir");
   return stdout.trim();
-}
-
-const snapshotTrailer = "Worktree-Hub-Snapshot";
-
-export async function snapshot(cwd: string, label: string, includeUntracked: boolean): Promise<boolean> {
-  const { stdout } = await git(cwd, "status", "--porcelain", includeUntracked ? "--untracked-files=all" : "--untracked-files=no");
-  if (!stdout.trim()) return false;
-  await git(cwd, "add", includeUntracked ? "-A" : "-u");
-  await commitSnapshot(cwd, label);
-  return true;
-}
-
-async function commitSnapshot(cwd: string, label: string): Promise<void> {
-  await git(cwd, "commit", "-q", "--no-verify", "-m", "wip", "-m", `${snapshotTrailer}: ${label}`);
-}
-
-export async function unwindSnapshots(cwd: string): Promise<number> {
-  let count = 0;
-  while ((await git(cwd, "log", "-1", "--format=%B")).stdout.includes(`\n${snapshotTrailer}:`)) {
-    await git(cwd, "reset", "-q", "HEAD~1");
-    count++;
-  }
-  return count;
-}
-
-export type Log = (line: string) => void;
-
-export async function moveBranchToMain(main: string, worktree: string, branch: string, log: Log): Promise<boolean> {
-  const name = path.basename(worktree);
-  log(`Recherche de travail non committé dans ${name}`);
-  const saved = await snapshot(worktree, name, true);
-  log(saved ? "Travail mis de côté dans un commit wip temporaire" : "Rien à transférer");
-  log("Détachement du worktree : git switch --detach");
-  await git(worktree, "switch", "--detach");
-  log(`Sur current : git switch ${branch}`);
-  try {
-    await git(main, "switch", branch);
-  } catch (error) {
-    log(`Refusé par git, retour du worktree sur ${branch}`);
-    await git(worktree, "switch", branch);
-    await unwindSnapshots(worktree);
-    throw error;
-  }
-  if (saved) {
-    await git(main, "reset", "-q", "--soft", "HEAD~1");
-    log(`Travail du worktree indexé (staged) sur current, ${branch} reste sur son dernier vrai commit`);
-  }
-  return saved;
-}
-
-export async function moveBranchToWorktree(main: string, worktree: string, branch: string, mainBranch: string, log: Log): Promise<number> {
-  await syncToMain(main, worktree, log);
-  log("Recherche de modifications sur current");
-  const saved = await snapshot(main, "current", false);
-  log(saved ? `Modifications de current mises de côté dans un commit wip sur ${branch}` : "Rien à mettre de côté sur current");
-  log(`Sur current : git switch ${mainBranch}`);
-  try {
-    await git(main, "switch", mainBranch);
-  } catch (error) {
-    if (saved) await git(main, "reset", "-q", "--soft", "HEAD~1");
-    throw error;
-  }
-  log(`Dans le worktree : git switch ${branch}`);
-  await git(worktree, "switch", branch);
-  const unwound = await unwindSnapshots(worktree);
-  log(unwound > 0 ? `${unwound} commit(s) "wip" défait(s) : git reset HEAD~1, le travail redevient non committé` : `Aucun commit "wip" à défaire`);
-  return unwound;
 }
 
 export async function mergeTarget(cwd: string): Promise<string> {
@@ -132,9 +80,50 @@ export async function isMerged(cwd: string, branch: string, target: string): Pro
   return !firstParents.includes(tip);
 }
 
+export async function behindCount(cwd: string, branch: string, target: string): Promise<number> {
+  try {
+    return Number((await git(cwd, "rev-list", "--count", `${branch}..${target}`)).stdout.trim());
+  } catch {
+    return 0;
+  }
+}
+
 export async function countChanges(cwd: string): Promise<number> {
   const { stdout } = await git(cwd, "status", "--porcelain", "--untracked-files=all");
   return stdout.split("\n").filter(Boolean).length;
+}
+
+export async function snapshot(cwd: string, label: string, includeUntracked: boolean): Promise<boolean> {
+  const { stdout } = await git(cwd, "status", "--porcelain", includeUntracked ? "--untracked-files=all" : "--untracked-files=no");
+  if (!stdout.trim()) return false;
+  await git(cwd, "add", includeUntracked ? "-A" : "-u");
+  await commitSnapshot(cwd, label);
+  return true;
+}
+
+export async function unwindSnapshots(cwd: string): Promise<number> {
+  let count = 0;
+  while ((await git(cwd, "log", "-1", "--format=%B")).stdout.includes(`\n${snapshotTrailer}:`)) {
+    await git(cwd, "reset", "-q", "HEAD~1");
+    count++;
+  }
+  return count;
+}
+
+export async function park(cwd: string, branch: string): Promise<boolean> {
+  if ((await countChanges(cwd)) === 0) return false;
+  await git(cwd, "stash", "push", "-q", "-u", "-m", `${parkPrefix}${branch}`);
+  return true;
+}
+
+export async function restorePark(cwd: string, branch: string): Promise<boolean> {
+  const entries = (await git(cwd, "stash", "list", "--format=%H %gs")).stdout.split("\n");
+  const sha = entries.find((entry) => entry.endsWith(`: ${parkPrefix}${branch}`))?.split(" ")[0];
+  if (!sha) return false;
+  await git(cwd, "stash", "apply", "-q", "--index", sha);
+  const ref = (await git(cwd, "stash", "list", "--format=%gd %H")).stdout.split("\n").find((entry) => entry.endsWith(` ${sha}`))?.split(" ")[0];
+  if (ref) await git(cwd, "stash", "drop", "-q", ref);
+  return true;
 }
 
 export async function syncToMain(main: string, worktree: string, log: Log): Promise<boolean> {
@@ -158,12 +147,53 @@ export async function syncToMain(main: string, worktree: string, log: Log): Prom
   return true;
 }
 
+export async function moveCurrent(main: string, from: Place, to: Place, log: Log): Promise<void> {
+  if (from.branch === to.branch) return;
+  if (from.worktree) await syncToMain(main, from.worktree, log);
+  const fromSaved = from.worktree ? await snapshot(main, "current", true) : false;
+  if (fromSaved) log(`Travail de current mis de côté sur ${from.branch} (commit wip temporaire)`);
+  const parked = from.worktree ? false : await park(main, from.branch);
+  if (parked) log(`Travail non committé de ${from.branch} garé (stash ${parkPrefix}${from.branch})`);
+  const toSaved = to.worktree ? await snapshot(to.worktree, path.basename(to.worktree), true) : false;
+  if (to.worktree) {
+    if (toSaved) log(`Travail de ${path.basename(to.worktree)} mis de côté (commit wip temporaire)`);
+    log(`Détachement de ${path.basename(to.worktree)} : git switch --detach`);
+    await git(to.worktree, "switch", "--detach");
+  }
+  log(`Sur current : git switch ${to.branch}`);
+  try {
+    await git(main, "switch", to.branch);
+  } catch (error) {
+    log("Refusé par git, retour à l'état de départ");
+    if (to.worktree) {
+      await git(to.worktree, "switch", to.branch);
+      await unwindSnapshots(to.worktree);
+    }
+    if (fromSaved) await git(main, "reset", "-q", "--soft", "HEAD~1");
+    if (parked) await restorePark(main, from.branch);
+    throw error;
+  }
+  if (toSaved) {
+    await git(main, "reset", "-q", "--soft", "HEAD~1");
+    log(`Travail du worktree indexé (staged) sur current, ${to.branch} reste sur son dernier vrai commit`);
+  }
+  if (!to.worktree && (await restorePark(main, to.branch))) log(`Travail garé de ${to.branch} restauré`);
+  if (from.worktree) {
+    log(`${path.basename(from.worktree)} reprend ${from.branch}`);
+    await git(from.worktree, "switch", from.branch);
+    const unwound = await unwindSnapshots(from.worktree);
+    if (unwound > 0) log(`${unwound} commit(s) "wip" défait(s) : le travail redevient non committé dans ${path.basename(from.worktree)}`);
+  }
+}
+
 export function gitError(error: unknown): string {
   const stderr = (error as { stderr?: string }).stderr?.trim();
   return stderr || String(error);
 }
 
-const maxOutput = 512 * 1024 * 1024;
+async function commitSnapshot(cwd: string, label: string): Promise<void> {
+  await git(cwd, "commit", "-q", "--no-verify", "-m", "wip", "-m", `${snapshotTrailer}: ${label}`);
+}
 
 function git(cwd: string, ...args: string[]): Promise<{ stdout: string; stderr: string }> {
   return run("git", args, { cwd, maxBuffer: maxOutput });
