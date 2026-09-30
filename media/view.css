@@ -34,6 +34,7 @@
   --wt-row-gap: 3px;
   --wt-row-margin: 2px 0;
   --wt-radius: 4px;
+  --wt-indent: 14px;
 }
 
 body {
@@ -136,7 +137,7 @@ body.loading .hub-header .status {
 }
 
 .action {
-  padding: 1px 8px;
+  padding: 2px 8px;
   border: 1px solid var(--wt-accent);
   border-radius: var(--wt-radius);
   background: transparent;
@@ -144,6 +145,7 @@ body.loading .hub-header .status {
   font: inherit;
   font-size: 0.8em;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -187,8 +189,16 @@ body.loading .hub-header .status {
   color: var(--wt-success);
 }
 
-.late {
+.late-all {
+  --wt-accent: var(--wt-warning);
+  --wt-accent-soft: color-mix(in srgb, var(--wt-warning) calc(var(--wt-warning-soft-alpha) * 100%), transparent);
   padding: 0 12px 10px;
+}
+
+.late-all .action {
+  width: 100%;
+  white-space: normal;
+  text-align: left;
 }
 
 body.busy .action {
@@ -290,8 +300,8 @@ body.busy .progress {
 
 .group-header {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   padding: var(--wt-header-padding);
   background: var(--wt-header-background);
   border-left: var(--wt-accent-bar) solid var(--wt-accent);
@@ -350,29 +360,52 @@ body.busy .progress {
   display: none;
 }
 
-.name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
-.branch {
-  padding: 1px 7px;
-  border-radius: var(--wt-radius);
-  background: var(--wt-accent-soft);
+.title-row .chevron {
+  align-self: flex-start;
+  margin-top: 0.45em;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
   color: var(--wt-accent);
-  font-size: 0.85em;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 50%;
+  overflow-wrap: anywhere;
+}
+
+.group.main .title {
+  color: var(--wt-foreground);
+}
+
+.chips,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding-left: var(--wt-indent);
+  font-weight: 400;
+}
+
+.tag.folder {
+  background: transparent;
+  color: var(--wt-muted);
+  border: 1px solid var(--wt-muted);
 }
 
 .count {
   margin-left: auto;
-  color: var(--wt-muted);
-  font-weight: 400;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--wt-tag-background);
+  color: var(--wt-tag-foreground);
+  font-size: 0.8em;
+  font-weight: 500;
 }
 
 .sessions {
@@ -403,13 +436,13 @@ body.busy .progress {
 }
 
 .session .title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--wt-foreground);
+  overflow-wrap: anywhere;
 }
 
 .meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   color: var(--wt-muted);
