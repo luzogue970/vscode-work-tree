@@ -60,8 +60,13 @@ describe("listSessions reads one transcript", () => {
       want: { cwd: worktree },
     },
     {
-      name: "relocation after the last message wins",
-      lines: [userLine(main, "a"), { type: "relocated", relocatedCwd: worktree }],
+      name: "a relocation to the window's project does not move a worktree session",
+      lines: [userLine(worktree, "a"), { type: "relocated", relocatedCwd: main }],
+      want: { cwd: worktree },
+    },
+    {
+      name: "a relocation is used when the tail has no message cwd",
+      lines: [userLine(main, "first"), ...Array.from({ length: 2000 }, () => ({ type: "summary", summary: "x".repeat(100) })), { type: "relocated", relocatedCwd: worktree }],
       want: { cwd: worktree },
     },
     {
@@ -142,6 +147,20 @@ describe("listSessions over a project", () => {
     const cwd = "/dup";
     writeTranscript(configDir, cwd, "one", [userLine(cwd, "x")]);
     assert.equal((await listSessions([cwd, cwd])).length, 1);
+  });
+
+  test("a session filed in two project dirs is listed once, newest copy first", async () => {
+    const older = writeTranscript(configDir, "/twice/a", "same", [userLine("/twice/a", "old copy")]);
+    writeTranscript(configDir, "/twice/b", "same", [userLine("/twice/b", "new copy")]);
+    utimesSync(older, new Date(2020, 0, 1), new Date(2020, 0, 1));
+    const sessions = await listSessions(["/twice/a", "/twice/b"]);
+    assert.deepEqual(sessions.map((session) => [session.id, session.title]), [["same", "new copy"]]);
+  });
+
+  test("superseded copies left by Claude Code are ignored", async () => {
+    const file = writeTranscript(configDir, "/superseded", "kept", [userLine("/superseded", "x")]);
+    writeFileSync(`${file}.superseded-1790690992768`, JSON.stringify(userLine("/superseded", "stale")) + "\n");
+    assert.deepEqual((await listSessions(["/superseded"])).map((session) => session.title), ["x"]);
   });
 
   test("a transcript is re-read only when its mtime changes", async () => {

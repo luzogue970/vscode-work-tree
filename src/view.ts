@@ -150,7 +150,7 @@ async function buildGroups(root: string): Promise<Group[]> {
     return { name, branch: branch ?? "(détaché)", path: tree.path, main: tree.main, state, changes, merged, sessions: [] };
   }));
   const linked = groups.filter((group) => !group.main).sort((a, b) => b.path.length - a.path.length);
-  const sessions = await listSessions(linked.map((group) => group.path));
+  const sessions = await listSessions([root, ...linked.map((group) => group.path)]);
   await mirrorTranscripts(sessions, root);
   for (const session of sessions) {
     const group = linked.find((candidate) => session.cwd === candidate.path || session.cwd.startsWith(candidate.path + path.sep));

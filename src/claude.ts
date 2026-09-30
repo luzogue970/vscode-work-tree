@@ -22,8 +22,12 @@ export function projectDir(cwd: string): string {
 
 export async function listSessions(cwds: string[]): Promise<Session[]> {
   const dirs = [...new Set(cwds.map(projectDir))];
-  const perDir = await Promise.all(dirs.map(readProject));
-  return perDir.flat().sort((a, b) => b.modified - a.modified);
+  const newest = new Map<string, Session>();
+  for (const session of (await Promise.all(dirs.map(readProject))).flat()) {
+    const known = newest.get(session.id);
+    if (!known || session.modified > known.modified) newest.set(session.id, session);
+  }
+  return [...newest.values()].sort((a, b) => b.modified - a.modified);
 }
 
 // EnterWorktree moves the transcript away and the Claude Code list reads only the workspace dir (includeWorktrees: false).
@@ -76,7 +80,8 @@ async function readSession(file: string, size: number, modified: number): Promis
       id: path.basename(file, ".jsonl"),
       file,
       title: lastField(tail, "customTitle") ?? firstField(head, "customTitle") ?? lastField(tail, "aiTitle") ?? firstField(head, "aiTitle") ?? lastField(tail, "lastPrompt") ?? prompt,
-      cwd: latestField(tail, ["cwd", "relocatedCwd"]) ?? firstField(head, "cwd") ?? "",
+      // "relocated" says where the transcript is filed (VS Code files it under the window's project), not where the session works.
+      cwd: lastField(tail, "cwd") ?? lastField(tail, "relocatedCwd") ?? firstField(head, "cwd") ?? "",
       branch: lastField(tail, "gitBranch") ?? firstField(head, "gitBranch") ?? "",
       modified,
     };
@@ -104,16 +109,6 @@ function lastField(text: string, key: string): string | undefined {
   let last: string | undefined;
   for (const match of text.matchAll(fieldRegex(key))) last = match[1];
   return last === undefined ? undefined : decode(last);
-}
-
-function latestField(text: string, keys: string[]): string | undefined {
-  let latest: { index: number; raw: string } | undefined;
-  for (const key of keys) {
-    for (const match of text.matchAll(fieldRegex(key))) {
-      if (latest === undefined || match.index > latest.index) latest = { index: match.index, raw: match[1] };
-    }
-  }
-  return latest === undefined ? undefined : decode(latest.raw);
 }
 
 function decode(raw: string): string {

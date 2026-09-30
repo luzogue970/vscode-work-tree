@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import * as path from "node:path";
 import { beforeEach, describe, test } from "node:test";
 import type { Build } from "../src/build";
@@ -82,6 +82,23 @@ describe("activation and listing", () => {
     assert.equal(data.running.version, "9.9.9");
     assert.equal(data.update, undefined);
     assert.ok(data.refreshedAt > 0);
+  });
+
+  test("a worktree conversation moved by Claude Code to the main project stays under the worktree", async () => {
+    const f = await fixture();
+    const mainCopy = path.join(projectDirOf(process.env.CLAUDE_CONFIG_DIR as string, f.root), "sess-1.jsonl");
+    unlinkSync(f.file);
+    appendFileSync(mainCopy, JSON.stringify({ type: "relocated", relocatedCwd: f.root, sessionId: "sess-1" }) + "\n");
+    f.view.send({ type: "refresh" });
+    await waitFor(() => groups(f.view)[1].sessions.length === 1 && groups(f.view)[1].sessions[0].file === mainCopy);
+    assert.equal(groups(f.view)[1].sessions[0].id, "sess-1");
+    assert.equal(groups(f.view)[0].sessions.length, 0);
+  });
+
+  test("a conversation working in the main checkout is never listed", async () => {
+    const f = await fixture();
+    const listed = groups(f.view).flatMap((group) => group.sessions.map((session) => session.id));
+    assert.deepEqual(listed, ["sess-1"]);
   });
 
   test("ready posts a loading message before the data", async () => {
