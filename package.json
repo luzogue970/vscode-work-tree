@@ -2,7 +2,7 @@
   "name": "worktree-hub",
   "displayName": "Worktree Hub",
   "description": "Conversations Claude Code groupées par worktree git : ouvrir, créer, déplacer une branche vers current et synchroniser le travail.",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "publisher": "mathieulp",
   "private": true,
   "engines": {
