@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
 import { listSessions, mirrorTranscripts, type Session } from "./claude";
-import { countChanges, isMerged, listBranches, listWorktrees, mergeTarget } from "./git";
+import { countChanges, defaultBranch, isMerged, listBranches, listWorktrees, mergeTarget } from "./git";
 
 export interface Target {
   path: string;
@@ -23,6 +23,7 @@ interface Group extends Target {
 
 interface Payload {
   groups: Group[];
+  defaultBranch?: string;
   error?: string;
 }
 
@@ -33,7 +34,7 @@ type Incoming =
   | { type: "open"; session: Session }
   | { type: "openInWindow"; session: Session }
   | { type: "goto"; target: Target }
-  | { type: "giveBack"; target: Target }
+  | { type: "gotoDefault"; target: Target }
   | { type: "sync"; target: Target }
   | { type: "newSession"; target: Target };
 
@@ -42,7 +43,7 @@ const commands: Record<Exclude<Incoming["type"], "ready" | "refresh">, string> =
   open: "worktreeHub.open",
   openInWindow: "worktreeHub.openInWindow",
   goto: "worktreeHub.goto",
-  giveBack: "worktreeHub.giveBack",
+  gotoDefault: "worktreeHub.gotoDefault",
   sync: "worktreeHub.sync",
   newSession: "worktreeHub.newSession",
 };
@@ -129,7 +130,7 @@ async function load(): Promise<Payload> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) return { groups: [], error: "Aucun dossier ouvert" };
   try {
-    return { groups: await buildGroups(root) };
+    return { groups: await buildGroups(root), defaultBranch: await defaultBranch(root) };
   } catch (error) {
     return { groups: [], error: String(error) };
   }

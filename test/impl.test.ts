@@ -162,7 +162,7 @@ describe("opening conversations", () => {
 });
 
 describe("branch transfer from the view", () => {
-  test("goto, sync and giveBack drive git and log every step", async () => {
+  test("goto, sync and gotoDefault drive git and log every step", async () => {
     const f = await fixture();
     const target = { path: f.worktree, branch: "feat/x" };
     write(f.worktree, "n", "uncommitted");
@@ -174,7 +174,7 @@ describe("branch transfer from the view", () => {
     assert.equal(git(f.root, "log", "-1", "--format=%s"), "commit on feat/x");
     assert.equal(git(f.root, "diff", "--cached", "--name-only"), "n");
     assert.equal(groups(f.view)[1].state, "taken");
-    assert.equal(f.context.workspaceState.get("previous:feat/x"), "main");
+    assert.equal(f.view.last("data")?.defaultBranch, "main");
     assert.ok(messages.length === 0);
 
     write(f.worktree, "bg", "background work");
@@ -187,13 +187,25 @@ describe("branch transfer from the view", () => {
     assert.equal(git(f.root, "log", "-1", "--format=%s"), "commit on feat/x");
     assert.equal(groups(f.view)[1].changes, 0);
 
-    const back = await transition(f.view, { type: "giveBack", target });
+    const back = await transition(f.view, { type: "gotoDefault", target });
     assert.equal(back.status, "done");
     assert.match(back.lines.join("\n"), /1 commit\(s\) "wip" défait\(s\)/);
     assert.equal(git(f.root, "branch", "--show-current"), "main");
     assert.equal(groups(f.view)[1].state, "owned");
     assert.match(git(f.worktree, "status", "--porcelain"), /\?\? bg/);
     assert.match(git(f.worktree, "status", "--porcelain"), /\?\? n/);
+  });
+
+  test("gotoDefault lands current on the default branch, not on the branch it came from", async () => {
+    const f = await fixture();
+    const target = { path: f.worktree, branch: "feat/x" };
+    git(f.root, "switch", "-qc", "feat/elsewhere");
+    assert.equal((await transition(f.view, { type: "goto", target })).status, "done");
+    const back = await transition(f.view, { type: "gotoDefault", target });
+    assert.equal(back.status, "done");
+    assert.match(back.lines.join("\n"), /git switch main/);
+    assert.equal(git(f.root, "branch", "--show-current"), "main");
+    assert.equal(git(f.worktree, "branch", "--show-current"), "feat/x");
   });
 
   test("a refused goto ends in error, shows it and leaves git untouched", async () => {

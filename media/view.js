@@ -7,6 +7,7 @@
   const transitionLingerMs = 8000;
   let loadingSince = 0;
   const transitions = {};
+  let defaultBranch = "main";
 
   window.addEventListener("message", (event) => {
     if (event.data.type === "loading") setLoading(true);
@@ -58,7 +59,8 @@
     if (status) status.textContent = active ? "Actualisation..." : status.dataset.idle;
   }
 
-  function render({ groups, error, running, update, refreshedAt }) {
+  function render({ groups, error, running, update, refreshedAt, defaultBranch: branch }) {
+    defaultBranch = branch ?? defaultBranch;
     root.replaceChildren(renderHeader(running, update, refreshedAt));
     if (error) {
       root.append(el("p", "message error", error));
@@ -119,7 +121,7 @@
     if (group.merged) header.append(el("span", "tag", "fusionnée"));
     const active = !group.main && !group.merged;
     if (active && group.state === "owned") header.append(action("Aller", "git switch " + group.branch + " sur current, le travail non committé du worktree y arrive indexé (staged), sans commit sur la branche ; le worktree garde ses fichiers, détaché", "goto", group));
-    if (active && group.state === "taken") header.append(action("Revenir", "Synchronise ce qui reste du worktree, current revient sur sa branche précédente, le worktree reprend " + group.branch + " avec tout le travail non committé (le sien et celui fait sur current)", "giveBack", group));
+    if (active && group.state === "taken") header.append(action(`Aller sur ${defaultBranch}`, `Synchronise ce qui reste du worktree, current passe sur ${defaultBranch}, le worktree reprend ${group.branch} avec tout le travail non committé (le sien et celui fait sur current)`, "gotoDefault", group));
     section.append(header);
     if (transitions[group.path]) section.append(renderTransition(transitions[group.path]));
     if (group.main) return section;

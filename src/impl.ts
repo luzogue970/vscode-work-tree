@@ -39,13 +39,8 @@ export async function activate(context: vscode.ExtensionContext, dir: string, ru
     vscode.commands.registerCommand("worktreeHub.open", (session: Session) => openSession(session)),
     vscode.commands.registerCommand("worktreeHub.openInWindow", (session: Session) => openInWindow(context, session)),
     vscode.commands.registerCommand("worktreeHub.newSession", (target: Target) => vscode.commands.executeCommand("claude-vscode.editor.open", undefined, `/worktree ${target.branch}`)),
-    vscode.commands.registerCommand("worktreeHub.goto", (target: Target) => transition(view, target, async (main, log) => {
-      await context.workspaceState.update(previousKey(target), main.branch);
-      await moveBranchToMain(main.path, target.path, target.branch, log);
-    })),
-    vscode.commands.registerCommand("worktreeHub.giveBack", (target: Target) => transition(view, target, async (main, log) => {
-      await moveBranchToWorktree(main.path, target.path, target.branch, context.workspaceState.get<string>(previousKey(target)) ?? (await defaultBranch(main.path)), log);
-    })),
+    vscode.commands.registerCommand("worktreeHub.goto", (target: Target) => transition(view, target, (main, log) => moveBranchToMain(main.path, target.path, target.branch, log))),
+    vscode.commands.registerCommand("worktreeHub.gotoDefault", (target: Target) => transition(view, target, async (main, log) => moveBranchToWorktree(main.path, target.path, target.branch, await defaultBranch(main.path), log))),
     vscode.commands.registerCommand("worktreeHub.sync", (target: Target) => transition(view, target, (main, log) => syncToMain(main.path, target.path, log))),
   ];
   void openPending(context);
@@ -85,10 +80,6 @@ async function transition(view: WorktreesView, target: Target, run: (main: { pat
     void vscode.window.showErrorMessage(`Worktree Hub : ${gitError(error)}`);
   }
   await view.refresh(true);
-}
-
-function previousKey(target: Target): string {
-  return `previous:${target.branch}`;
 }
 
 async function openSession(session: Session): Promise<void> {
