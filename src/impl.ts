@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
 import { configDir } from "./claude";
-import { defaultBranch, gitCommonDir, gitError, listWorktrees, moveCurrent, syncToMain, worktreeName, type Log } from "./git";
+import { defaultBranch, gitCommonDir, gitError, listWorktrees, moveCurrent, syncToMain, visitedWorktree, type Log } from "./git";
 import { StateStore } from "./state";
 import { WorktreesView, worksIn, type ListedSession, type Target } from "./view";
 
@@ -73,8 +73,7 @@ async function goto(view: WorktreesView, target: Target): Promise<void> {
     const trees = await listWorktrees(root);
     const current = trees[0].branch;
     if (!current) throw new Error("current n'est sur aucune branche (HEAD détaché) : rien n'a été déplacé");
-    const holder = trees.find((tree) => !tree.main && tree.branch === undefined && path.basename(tree.path) === worktreeName(current));
-    await moveCurrent(root, { branch: current, worktree: holder?.path }, { branch: target.branch, worktree: target.path }, log);
+    await moveCurrent(root, { branch: current, worktree: visitedWorktree(trees)?.path }, { branch: target.branch, worktree: target.path }, log);
   });
   const root = workspaceRoot();
   if (!moved || !root || !target.session) return;
@@ -89,16 +88,18 @@ async function transition(view: WorktreesView, target: Target, run: (root: strin
     lines.push(line);
     view.transition(target.path, lines, "running");
   };
-  let succeeded = true;
-  try {
-    await run(root, log);
-    view.transition(target.path, lines, "done");
-  } catch (error) {
-    succeeded = false;
-    lines.push(gitError(error));
-    view.transition(target.path, lines, "error");
-    void vscode.window.showErrorMessage(`Worktree Hub : ${gitError(error)}`);
-  }
+  const succeeded = await view.exclusive(async () => {
+    try {
+      await run(root, log);
+      view.transition(target.path, lines, "done");
+      return true;
+    } catch (error) {
+      lines.push(gitError(error));
+      view.transition(target.path, lines, "error");
+      void vscode.window.showErrorMessage(`Worktree Hub : ${gitError(error)}`);
+      return false;
+    }
+  });
   await view.refresh(true);
   return succeeded;
 }

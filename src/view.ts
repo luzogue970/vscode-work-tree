@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
 import { listRepoSessions, liveSessions, mirrorTranscripts, projectDir, scanWorktreeEntries, type Session } from "./claude";
-import { behindCount, countChanges, defaultBranch, isMerged, listBranches, listWorktrees, mergeTarget, worktreeName } from "./git";
+import { behindCount, countChanges, defaultBranch, gitError, isMerged, listBranches, listWorktrees, mergeTarget, syncToMain, visitedWorktree, worktreeName } from "./git";
 import type { StateStore } from "./state";
 
 export interface Target {
@@ -29,6 +29,7 @@ interface Group {
   current: boolean;
   state: GroupState;
   changes: number;
+  syncError?: string;
   merged: boolean;
   behind: number;
   sessions: ListedSession[];
@@ -71,6 +72,8 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
   private update: Build | undefined;
   private lastPosted = "";
   private readonly listeners: vscode.Disposable[] = [];
+  private queue: Promise<unknown> = Promise.resolve();
+  private readonly syncErrors = new Map<string, string>();
 
   constructor(private readonly media: vscode.Uri, private readonly running: Build, private readonly store: StateStore) {}
 
@@ -127,9 +130,34 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) return { groups: [], error: "Aucun dossier ouvert" };
     try {
-      return { groups: await buildGroups(root, this.store), defaultBranch: await defaultBranch(root) };
+      await this.exclusive(() => this.bringBack(root));
+      const groups = await buildGroups(root, this.store);
+      for (const group of groups) group.syncError = this.syncErrors.get(group.path);
+      return { groups, defaultBranch: await defaultBranch(root) };
     } catch (error) {
       return { groups: [], error: String(error) };
+    }
+  }
+
+  exclusive<T>(task: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(task, task);
+    this.queue = next.catch(() => undefined);
+    return next;
+  }
+
+  private async bringBack(root: string): Promise<void> {
+    const visited = visitedWorktree(await listWorktrees(root));
+    if (!visited || (await countChanges(visited.path)) === 0) {
+      this.syncErrors.clear();
+      return;
+    }
+    const lines = ["Rapatriement automatique vers current"];
+    try {
+      await syncToMain(root, visited.path, (line) => lines.push(line));
+      this.syncErrors.delete(visited.path);
+      this.transition(visited.path, lines, "done");
+    } catch (error) {
+      this.syncErrors.set(visited.path, gitError(error));
     }
   }
 
@@ -172,7 +200,7 @@ async function buildGroups(root: string, store: StateStore): Promise<Group[]> {
     const name = path.basename(tree.path);
     const branch = tree.branch ?? branches.find((candidate) => worktreeName(candidate) === name);
     const state: GroupState = tree.branch ? "owned" : branch !== undefined && branch === mainBranch ? "taken" : "detached";
-    const changes = tree.main ? 0 : await countChanges(tree.path);
+    const changes = tree.main ? 0 : await countChanges(state === "taken" ? root : tree.path);
     const merged = !tree.main && branch !== undefined && (await isMerged(root, branch, target));
     const behind = tree.main || merged || branch === undefined ? 0 : await behindCount(root, branch, target);
     const home = state === "taken" ? root : tree.path;

@@ -18,6 +18,7 @@ interface Group {
   current: boolean;
   state: string;
   changes: number;
+  syncError?: string;
   merged: boolean;
   behind: number;
   sessions: ListedSession[];
@@ -256,7 +257,7 @@ describe("opening conversations", () => {
 });
 
 describe("moving branches from the view", () => {
-  test("Aller, Synchroniser and Aller sur main drive git, log every step and open the conversation", async () => {
+  test("Aller, the automatic bring-back and Aller sur main drive git, log every step and open the conversation", async () => {
     const f = await fixture();
     const session = group(f.view, "feat-x").sessions[0];
     const target = { path: f.worktree, branch: "feat/x", session };
@@ -278,12 +279,11 @@ describe("moving branches from the view", () => {
     assert.equal(messages.length, 0);
 
     write(f.worktree, "bg", "background work");
-    await until(f.view, () => group(f.view, "feat-x").changes === 1);
-    const sync = await transition(f.view, { type: "sync", target });
-    assert.equal(sync.status, "done");
+    await until(f.view, () => git(f.root, "diff", "--cached", "--name-only").includes("bg"));
     assert.equal(readFileSync(path.join(f.root, "bg"), "utf8"), "background work");
     assert.deepEqual(git(f.root, "diff", "--cached", "--name-only").split("\n"), ["bg", "n"]);
-    await until(f.view, () => group(f.view, "feat-x").changes === 0);
+    assert.equal(git(f.worktree, "status", "--porcelain"), "");
+    assert.equal(git(f.root, "log", "-1", "--format=%s"), "commit on feat/x");
 
     const back = await transition(f.view, { type: "gotoDefault", target });
     assert.equal(back.status, "done");
@@ -294,6 +294,46 @@ describe("moving branches from the view", () => {
     const worktreeStatus = git(f.worktree, "status", "--porcelain");
     assert.match(worktreeStatus, /\?\? bg/);
     assert.match(worktreeStatus, /\?\? n/);
+  });
+
+  test("work landing in the visited worktree is brought back to current on its own", async () => {
+    const f = await fixture();
+    const target = { path: f.worktree, branch: "feat/x" };
+    assert.equal((await transition(f.view, { type: "goto", target })).status, "done");
+    write(f.worktree, "late", "written in the worktree after Aller");
+    await until(f.view, () => git(f.root, "status", "--porcelain").includes("A  late"));
+    const box = f.view.last("transition") as { path: string; lines: string[]; status: string };
+    assert.equal(box.path, f.worktree);
+    assert.equal(box.status, "done");
+    assert.equal(box.lines[0], "Rapatriement automatique vers current");
+    assert.equal(git(f.worktree, "status", "--porcelain"), "");
+    assert.equal(group(f.view, "feat-x").syncError, undefined);
+    assert.equal(messages.length, 0);
+  });
+
+  test("a blocked bring-back is flagged quietly, and the retry works once the conflict is gone", async () => {
+    const f = await fixture();
+    const target = { path: f.worktree, branch: "feat/x" };
+    assert.equal((await transition(f.view, { type: "goto", target })).status, "done");
+    write(f.root, "g", "edited on current");
+    write(f.worktree, "g", "edited in the worktree");
+    await until(f.view, () => group(f.view, "feat-x").syncError !== undefined);
+    assert.equal(messages.length, 0);
+    assert.equal(readFileSync(path.join(f.root, "g"), "utf8"), "edited on current");
+    git(f.root, "checkout", "--", "g");
+    const retry = await transition(f.view, { type: "sync", target });
+    assert.equal(retry.status, "done");
+    assert.equal(readFileSync(path.join(f.root, "g"), "utf8"), "edited in the worktree");
+    await until(f.view, () => group(f.view, "feat-x").syncError === undefined);
+  });
+
+  test("the current block counts the uncommitted changes of current", async () => {
+    const f = await fixture();
+    const target = { path: f.worktree, branch: "feat/x" };
+    assert.equal((await transition(f.view, { type: "goto", target })).status, "done");
+    write(f.root, "on-current-1", "a");
+    write(f.root, "on-current-2", "b");
+    await until(f.view, () => group(f.view, "feat-x").changes === 2);
   });
 
   test("Aller from another worktree's branch swaps the two", async () => {

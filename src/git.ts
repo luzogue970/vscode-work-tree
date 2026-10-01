@@ -37,6 +37,12 @@ export function worktreeName(branch: string): string {
   return branch.replaceAll("/", "-");
 }
 
+export function visitedWorktree(trees: Worktree[]): Worktree | undefined {
+  const current = trees[0]?.branch;
+  if (current === undefined) return undefined;
+  return trees.find((tree) => !tree.main && tree.branch === undefined && path.basename(tree.path) === worktreeName(current));
+}
+
 export async function listBranches(cwd: string): Promise<string[]> {
   const { stdout } = await git(cwd, "for-each-ref", "--format=%(refname:short)", "refs/heads");
   return stdout.split("\n").filter(Boolean);

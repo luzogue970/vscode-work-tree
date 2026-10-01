@@ -137,7 +137,7 @@
 
     if (group.current) {
       const current = el("span", "tag current-tag", "current");
-      current.title = group.main ? "Le dossier principal, sur aucune branche de worktree" : `Le dossier principal est sur ${group.branch}, la branche de ce worktree`;
+      current.title = group.main ? "Le dossier principal, sur aucune branche de worktree" : `On développe sur current, qui est sur ${group.branch}. Le worktree n'est qu'une sauvegarde : ce qui y arrive est rapatrié ici automatiquement, et il récupère le travail de current quand tu changes de branche.`;
       chips.append(current);
     }
     if (!group.main && group.name !== slug(group.branch)) {
@@ -150,8 +150,13 @@
     else if (group.merged) chips.append(el("span", "tag", "fusionnée"));
     if (!group.main && group.changes > 0) {
       const changes = el("span", "tag changes", `${group.changes} modif${group.changes > 1 ? "s" : ""}`);
-      changes.title = "Fichiers modifiés ou nouveaux, non committés, dans le worktree";
+      changes.title = group.state === "taken" ? "Fichiers modifiés ou nouveaux, non committés, sur current : ils iront dans ce worktree quand tu changeras de branche" : "Fichiers modifiés ou nouveaux, non committés, dans le worktree";
       chips.append(changes);
+    }
+    if (group.syncError) {
+      const blocked = el("span", "tag blocked", "rapatriement bloqué");
+      blocked.title = `Les modifs faites dans le worktree n'ont pas pu arriver sur current : ${group.syncError}`;
+      chips.append(blocked);
     }
     const active = !group.main && !group.merged;
     if (active && group.behind > 0) {
@@ -161,7 +166,7 @@
     }
 
     if (active && group.state === "owned") actions.append(action("Aller", `Échange : la branche de current retourne dans son worktree (ou son travail est garé), ${group.branch} arrive sur current avec le travail du worktree indexé, et sa conversation s'ouvre`, "goto", group));
-    if (active && group.state === "taken" && group.changes > 0) actions.append(action("Synchroniser", "Amène les nouvelles modifs du worktree sur current, indexées (staged), sans commit sur " + group.branch, "sync", group));
+    if (active && group.syncError) actions.append(action("Réessayer le rapatriement", "Amène les modifs faites dans le worktree sur current, indexées (staged), une fois le conflit réglé", "sync", group));
     if (active && group.state === "taken") actions.append(action(`Aller sur ${defaultBranch}`, `Synchronise ce qui reste du worktree, current passe sur ${defaultBranch}, le worktree reprend ${group.branch} avec tout le travail non committé (le sien et celui fait sur current)`, "gotoDefault", group));
     if (active && group.behind > 0) actions.append(action("Mettre à jour", `Ouvre une conversation avec /worktree update ${group.branch} pré-rempli : Entrée pour lancer le merge de ${defaultBranch}, résolution des conflits comprise`, "mergeDefault", group));
     if (active) actions.append(action("+ Conversation", "Nouvelle conversation Claude dans ce worktree : ouvre un onglet ici et lance /worktree " + group.branch, "newSession", group));

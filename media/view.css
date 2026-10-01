@@ -175,6 +175,11 @@ body.loading .hub-header .status {
   background: var(--wt-accent-soft);
 }
 
+.tag.blocked {
+  background: color-mix(in srgb, var(--wt-error) 20%, transparent);
+  color: var(--wt-error);
+}
+
 .tag.changes {
   background: var(--wt-accent-soft);
   color: var(--wt-accent);
