@@ -15,6 +15,7 @@ interface Group {
   path: string;
   home: string;
   main: boolean;
+  current: boolean;
   state: string;
   changes: number;
   merged: boolean;
@@ -106,7 +107,7 @@ describe("activation and listing", () => {
   test("lists only the conversations that entered the worktree, and mirrors their transcript", async () => {
     const f = await fixture();
     const list = groups(f.view);
-    assert.deepEqual(list.map((candidate) => [candidate.name, candidate.branch, candidate.main, candidate.state, candidate.sessions.map((session) => session.id)]), [[path.basename(f.root), "main", true, "owned", []], ["feat-x", "feat/x", false, "owned", ["sess-1"]]]);
+    assert.deepEqual(list.map((candidate) => [candidate.name, candidate.branch, candidate.main, candidate.current, candidate.state, candidate.sessions.map((session) => session.id)]), [[path.basename(f.root), "main", true, true, "owned", []], ["feat-x", "feat/x", false, false, "owned", ["sess-1"]]]);
     const session = list[1].sessions[0];
     assert.equal(session.title, "Worktree talk");
     assert.equal(session.location, f.worktree);
@@ -270,6 +271,7 @@ describe("moving branches from the view", () => {
     assert.equal(git(f.root, "diff", "--cached", "--name-only"), "n");
     assert.equal(group(f.view, "feat-x").state, "taken");
     assert.equal(group(f.view, "feat-x").home, f.root);
+    assert.deepEqual(groups(f.view).map((candidate) => [candidate.name, candidate.current]), [["feat-x", true]]);
     assert.equal(group(f.view, "feat-x").sessions[0].follow, "/worktree here feat/x");
     await waitFor(() => opened().length === 1);
     assert.deepEqual(opened(), [["sess-1", "/worktree here feat/x"]]);
@@ -288,6 +290,7 @@ describe("moving branches from the view", () => {
     assert.match(back.lines.join("\n"), /git switch main[\s\S]*feat-x reprend feat\/x/);
     assert.equal(git(f.root, "branch", "--show-current"), "main");
     assert.equal(group(f.view, "feat-x").state, "owned");
+    assert.deepEqual(groups(f.view).map((candidate) => [candidate.main, candidate.current]), [[true, true], [false, false]]);
     const worktreeStatus = git(f.worktree, "status", "--porcelain");
     assert.match(worktreeStatus, /\?\? bg/);
     assert.match(worktreeStatus, /\?\? n/);
@@ -303,6 +306,7 @@ describe("moving branches from the view", () => {
     assert.equal(git(f.root, "branch", "--show-current"), "feat/y");
     assert.equal(group(f.view, "feat-x").state, "owned");
     assert.equal(group(f.view, "feat-y").state, "taken");
+    assert.deepEqual(groups(f.view).map((candidate) => [candidate.name, candidate.current]), [["feat-y", true], ["feat-x", false]]);
     assert.match(git(f.worktree, "status", "--porcelain"), /\?\? made-on-current/);
     await waitFor(() => opened().some((args) => args[0] === "sess-y"));
   });

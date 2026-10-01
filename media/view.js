@@ -68,9 +68,12 @@
     }
     const late = groups.filter((group) => !group.main && !group.merged && group.behind > 0);
     if (late.length > 1) root.append(renderLate(late));
-    for (const group of groups.filter((group) => !group.merged)) root.append(renderGroup(group));
+    const [current, ...others] = groups.filter((group) => group.current || !group.merged);
+    if (current) root.append(renderGroup(current));
+    if (others.length > 0) root.append(el("p", "section-label", "Autres worktrees"));
+    for (const group of others) root.append(renderGroup(group));
     if (!groups.some((group) => !group.main)) root.append(el("p", "message", "Aucun worktree. Dans une conversation : /worktree <branche>."));
-    const archived = groups.filter((group) => group.merged);
+    const archived = groups.filter((group) => !group.current && group.merged);
     if (archived.length > 0) root.append(renderArchive(archived));
   }
 
@@ -118,7 +121,7 @@
   }
 
   function renderGroup(group) {
-    const section = el("section", `group ${group.state}${group.main ? " main" : ""}${group.merged ? " merged" : ""}`);
+    const section = el("section", `group ${group.state}${group.main ? " main" : ""}${group.current ? " current" : ""}${group.merged && !group.current ? " merged" : ""}`);
     section.dataset.path = group.path;
     section.style.setProperty("--wt-accent-hue", String(hue(group.branch)));
     if (state.collapsed[group.path]) section.classList.add("collapsed");
@@ -132,13 +135,16 @@
     const actions = el("div", "actions");
     header.append(titleRow, chips, actions);
 
-    if (group.main) chips.append(el("span", "tag", "current"));
+    if (group.current) {
+      const current = el("span", "tag current-tag", "current");
+      current.title = group.main ? "Le dossier principal, sur aucune branche de worktree" : `Le dossier principal est sur ${group.branch}, la branche de ce worktree`;
+      chips.append(current);
+    }
     if (!group.main && group.name !== slug(group.branch)) {
       const folder = el("span", "tag folder", group.name);
       folder.title = `Dossier du worktree : ${group.path}`;
       chips.append(folder);
     }
-    if (group.state === "taken") chips.append(el("span", "tag state", "sur current"));
     if (group.state === "detached") chips.append(el("span", "tag state", "détaché"));
     if (group.state === "removed") chips.append(el("span", "tag", "supprimé"));
     else if (group.merged) chips.append(el("span", "tag", "fusionnée"));

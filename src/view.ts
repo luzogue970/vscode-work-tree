@@ -26,6 +26,7 @@ interface Group {
   path: string;
   home: string;
   main: boolean;
+  current: boolean;
   state: GroupState;
   changes: number;
   merged: boolean;
@@ -175,7 +176,7 @@ async function buildGroups(root: string, store: StateStore): Promise<Group[]> {
     const merged = !tree.main && branch !== undefined && (await isMerged(root, branch, target));
     const behind = tree.main || merged || branch === undefined ? 0 : await behindCount(root, branch, target);
     const home = state === "taken" ? root : tree.path;
-    return { name, branch: branch ?? "(détaché)", path: tree.path, home, main: tree.main, state, changes, merged, behind, sessions: [] };
+    return { name, branch: branch ?? "(détaché)", path: tree.path, home, main: tree.main, current: false, state, changes, merged, behind, sessions: [] };
   }));
   for (const group of groups) if (!group.main && group.branch !== "(détaché)") state.worktrees[group.path] = group.branch;
 
@@ -193,12 +194,20 @@ async function buildGroups(root: string, store: StateStore): Promise<Group[]> {
     group.sessions.push({ ...session, location, live: live.has(session.id), follow });
   }
   if (scanned) await store.save(root, state);
-  return groups;
+  return currentFirst(groups);
+}
+
+function currentFirst(groups: Group[]): Group[] {
+  const visited = groups.find((group) => !group.main && group.state === "taken");
+  const current = visited ?? groups.find((group) => group.main);
+  if (!current) return groups;
+  current.current = true;
+  return [current, ...groups.filter((group) => group !== current && !(visited && group.main))];
 }
 
 function removedGroup(groups: Group[], worktree: string, branch: string | undefined): Group | undefined {
   if (branch === undefined) return undefined;
-  const group: Group = { name: path.basename(worktree), branch, path: worktree, home: worktree, main: false, state: "removed", changes: 0, merged: true, behind: 0, sessions: [] };
+  const group: Group = { name: path.basename(worktree), branch, path: worktree, home: worktree, main: false, current: false, state: "removed", changes: 0, merged: true, behind: 0, sessions: [] };
   groups.push(group);
   return group;
 }

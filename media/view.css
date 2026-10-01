@@ -5,6 +5,7 @@
   --wt-foreground: var(--vscode-sideBar-foreground, var(--vscode-foreground));
   --wt-muted: var(--vscode-descriptionForeground);
   --wt-header-background: var(--vscode-sideBarSectionHeader-background);
+  --wt-current-background: var(--vscode-list-inactiveSelectionBackground, var(--wt-header-background));
   --wt-hover-background: var(--vscode-list-hoverBackground);
   --wt-focus-border: var(--vscode-focusBorder);
   --wt-error: var(--vscode-errorForeground);
@@ -312,6 +313,26 @@ body.busy .progress {
 
 .group.main .group-header {
   cursor: default;
+}
+
+.group.current > .group-header {
+  background: var(--wt-current-background);
+  border-left-width: calc(var(--wt-accent-bar) * 2);
+}
+
+.tag.current-tag {
+  background: var(--wt-cta-background);
+  color: var(--wt-cta-foreground);
+  font-weight: 600;
+}
+
+.section-label {
+  margin: 0;
+  padding: 4px 12px 6px;
+  color: var(--wt-muted);
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .archive-header {
