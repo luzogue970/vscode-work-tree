@@ -47,7 +47,7 @@ export async function activate(context: vscode.ExtensionContext, dir: string, ru
     vscode.commands.registerCommand("worktreeHub.gotoDefault", (target: Target) => transition(view, target, async (root, log) => {
       await moveCurrent(root, { branch: target.branch, worktree: target.path }, { branch: await defaultBranch(root) }, log);
     })),
-    vscode.commands.registerCommand("worktreeHub.sync", (target: Target) => transition(view, target, (root, log) => syncToMain(root, target.path, log))),
+    vscode.commands.registerCommand("worktreeHub.sync", (target: Target) => transition(view, target, (root, log) => syncToMain(root, target.path, log, true))),
   ];
   void openPending(context);
   return {

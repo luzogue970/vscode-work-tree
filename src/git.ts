@@ -132,7 +132,7 @@ export async function restorePark(cwd: string, branch: string): Promise<boolean>
   return true;
 }
 
-export async function syncToMain(main: string, worktree: string, log: Log): Promise<boolean> {
+export async function syncToMain(main: string, worktree: string, log: Log, keepConflicts = false): Promise<boolean> {
   const name = path.basename(worktree);
   log(`Recherche de nouvelles modifications dans ${name}`);
   await git(worktree, "add", "-A");
@@ -141,20 +141,33 @@ export async function syncToMain(main: string, worktree: string, log: Log): Prom
     log("Rien de nouveau à synchroniser");
     return false;
   }
-  log(`${files.length} fichier(s) à amener sur current : git apply --index`);
+  log(`${files.length} fichier(s) à amener sur current : git apply --3way`);
+  let conflicts: string[];
   try {
-    await gitWithInput(main, (await git(worktree, "diff", "--cached", "--binary")).stdout, "apply", "--index");
+    const patch = (await git(worktree, "diff", "--cached", "--binary")).stdout;
+    conflicts = conflictedPaths(await gitWithInput(main, patch, "apply", "--3way", "--check"));
+    if (conflicts.length > 0 && !keepConflicts) throw new Error(`conflit avec current sur ${conflicts.join(", ")} : "Réessayer le rapatriement" l'amène avec ses marqueurs de conflit`);
+    await gitWithInput(main, patch, "apply", "--3way").catch((error: { stderr?: string }) => {
+      if (conflicts.length === 0 || conflictedPaths(error.stderr ?? "").length === 0) throw error;
+    });
   } catch (error) {
     await git(worktree, "reset", "-q");
     throw error;
   }
   await commitSnapshot(worktree, `${name} sync`);
-  log("Modifications indexées (staged) sur current ; repère posé dans le worktree, hors branche");
+  if (conflicts.length > 0) log(`Conflit(s) laissé(s) sur current, à résoudre : ${conflicts.join(", ")}`);
+  else log("Modifications indexées (staged) sur current ; repère posé dans le worktree, hors branche");
   return true;
+}
+
+function conflictedPaths(applyOutput: string): string[] {
+  return [...applyOutput.matchAll(/^Applied patch to '(.+)' with conflicts\.$/gm)].map((match) => match[1]);
 }
 
 export async function moveCurrent(main: string, from: Place, to: Place, log: Log): Promise<void> {
   if (from.branch === to.branch) return;
+  const unmerged = (await git(main, "diff", "--name-only", "--diff-filter=U")).stdout.split("\n").filter(Boolean);
+  if (unmerged.length > 0) throw new Error(`conflit(s) non résolu(s) sur current (${unmerged.join(", ")}) : rien n'a été déplacé`);
   if (from.worktree) await syncToMain(main, from.worktree, log);
   const fromSaved = from.worktree ? await snapshot(main, "current", true) : false;
   if (fromSaved) log(`Travail de current mis de côté sur ${from.branch} (commit wip temporaire)`);
@@ -205,9 +218,10 @@ function git(cwd: string, ...args: string[]): Promise<{ stdout: string; stderr: 
   return run("git", args, { cwd, maxBuffer: maxOutput });
 }
 
-function gitWithInput(cwd: string, input: string, ...args: string[]): Promise<void> {
+// Forced to the C locale: conflictedPaths parses git's English messages.
+function gitWithInput(cwd: string, input: string, ...args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile("git", args, { cwd, maxBuffer: maxOutput }, (error, _stdout, stderr) => (error ? reject(Object.assign(error, { stderr })) : resolve()));
+    const child = execFile("git", args, { cwd, maxBuffer: maxOutput, env: { ...process.env, LC_ALL: "C" } }, (error, _stdout, stderr) => (error ? reject(Object.assign(error, { stderr })) : resolve(stderr)));
     child.stdin?.end(input);
   });
 }

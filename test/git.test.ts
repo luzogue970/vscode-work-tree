@@ -361,6 +361,32 @@ describe("syncToMain", () => {
   });
 });
 
+describe("syncToMain on a file current committed since the last sync", () => {
+  const cases = [
+    { name: "edits in different hunks merge cleanly", worktreeContent: "1\n2\nthree\n", keepConflicts: false, wantRejected: false, wantRoot: "one\n2\nthree\n", wantStaged: ["g"], wantUnmerged: [] as string[], wantWorktree: "" },
+    { name: "a conflict is refused and changes nothing", worktreeContent: "ONE\n2\n3\n", keepConflicts: false, wantRejected: true, wantRoot: "one\n2\n3\n", wantStaged: [] as string[], wantUnmerged: [] as string[], wantWorktree: "M g" },
+    { name: "a kept conflict lands with its markers", worktreeContent: "ONE\n2\n3\n", keepConflicts: true, wantRejected: false, wantRoot: "<<<<<<< ours\none\n=======\nONE\n>>>>>>> theirs\n2\n3\n", wantStaged: ["g"], wantUnmerged: ["g"], wantWorktree: "" },
+  ];
+  for (const tc of cases) {
+    test(tc.name, async () => {
+      const { root, worktree } = setupTaken();
+      write(worktree, "g", "1\n2\n3\n");
+      await moveCurrent(root, { branch: "main" }, { branch: "feat/x", worktree }, quiet);
+      write(root, "g", "one\n2\n3\n");
+      git(root, "commit", "-qam", "user commit");
+      write(worktree, "g", tc.worktreeContent);
+      const synced = syncToMain(root, worktree, quiet, tc.keepConflicts);
+      if (tc.wantRejected) await assert.rejects(synced, /conflit avec current sur g/);
+      else assert.equal(await synced, true);
+      assert.equal(readFileSync(path.join(root, "g"), "utf8"), tc.wantRoot);
+      assert.deepEqual(staged(root), tc.wantStaged);
+      assert.deepEqual(git(root, "diff", "--name-only", "--diff-filter=U").split("\n").filter(Boolean), tc.wantUnmerged);
+      assert.equal(status(worktree), tc.wantWorktree);
+      if (tc.wantUnmerged.length > 0) await assert.rejects(moveCurrent(root, { branch: "feat/x", worktree }, { branch: "main" }, quiet), /non résolu/);
+    });
+  }
+});
+
 describe("park and restorePark", () => {
   const cases = [
     { name: "a clean tree parks nothing", dirty: false, other: false, wantParked: false, wantRestored: false },
