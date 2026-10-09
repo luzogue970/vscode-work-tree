@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { describe, test } from "node:test";
-import { behindCount, countChanges, defaultBranch, gitCommonDir, gitError, isMerged, listBranches, listWorktrees, mergeTarget, moveCurrent, park, restorePark, snapshot, syncToMain, unwindSnapshots } from "../src/git";
+import { behindCount, countChanges, defaultBranch, gitCommonDir, gitError, isMerged, listBranches, listWorktrees, mergeDefaultInto, mergeTarget, moveCurrent, park, restorePark, snapshot, syncToMain, unwindSnapshots } from "../src/git";
 import { addWorktree, branchWithCommit, git, initRepo, tempDir, write } from "./helpers";
 
 const quiet = () => undefined;
@@ -403,6 +403,56 @@ describe("park and restorePark", () => {
     });
   }
 });
+
+describe("mergeDefaultInto", () => {
+  const cases = [
+    { name: "the worktree's branch gets main merged where it is checked out", taken: false, remote: false, conflict: false, wantError: undefined as RegExp | undefined },
+    { name: "a branch on current is merged on current", taken: true, remote: false, conflict: false, wantError: undefined },
+    { name: "origin is fetched before merging origin/main", taken: false, remote: true, conflict: false, wantError: undefined },
+    { name: "a conflict aborts the merge and leaves the branch as it was", taken: false, remote: false, conflict: true, wantError: /conflit sur f : merge annulé/ },
+  ];
+  for (const tc of cases) {
+    test(tc.name, async () => {
+      const { root, worktree } = setupTaken();
+      if (tc.conflict) {
+        write(worktree, "f", "branch side\n");
+        git(worktree, "commit", "-qam", "branch edit");
+      }
+      const main = tc.remote ? publishedClone(root) : root;
+      write(main, "f", "main side\n");
+      git(main, "commit", "-qam", "main edit");
+      if (tc.remote) git(main, "push", "-q", "origin", "main");
+      const mainTip = git(main, "rev-parse", "HEAD");
+      if (tc.taken) await moveCurrent(root, { branch: "main" }, { branch: "feat/x", worktree }, quiet);
+      const checkout = tc.taken ? root : worktree;
+      const tip = git(checkout, "rev-parse", "HEAD");
+      const done = mergeDefaultInto(root, "feat/x", quiet);
+      if (tc.wantError) await assert.rejects(done, tc.wantError);
+      else await done;
+      assert.equal(git(checkout, "branch", "--show-current"), "feat/x");
+      assert.equal(existsSync(git(checkout, "rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD")), false);
+      if (tc.wantError) assert.equal(git(checkout, "rev-parse", "HEAD"), tip);
+      else assert.equal(git(checkout, "merge-base", "--is-ancestor", mainTip, "HEAD"), "");
+    });
+  }
+
+  test("a branch checked out nowhere is refused", async () => {
+    const root = initRepo();
+    git(root, "branch", "feat/x");
+    await assert.rejects(mergeDefaultInto(root, "feat/x", quiet), /extraite nulle part/);
+  });
+});
+
+function publishedClone(root: string): string {
+  const remote = tempDir("remote");
+  git(remote, "init", "-q", "--bare", "-b", "main");
+  git(root, "remote", "add", "origin", remote);
+  git(root, "push", "-qu", "origin", "main");
+  git(root, "remote", "set-head", "origin", "main");
+  const clone = tempDir("clone");
+  git(clone, "clone", "-q", remote, ".");
+  return clone;
+}
 
 describe("behindCount", () => {
   const cases = [

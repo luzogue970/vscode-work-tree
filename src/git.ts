@@ -20,6 +20,7 @@ export type Log = (line: string) => void;
 const snapshotTrailer = "Worktree-Hub-Snapshot";
 const parkPrefix = "worktree-hub:park:";
 const maxOutput = 512 * 1024 * 1024;
+const fetchTimeoutMs = 60_000;
 
 export async function listWorktrees(cwd: string): Promise<Worktree[]> {
   const { stdout } = await git(cwd, "worktree", "list", "--porcelain");
@@ -166,7 +167,7 @@ function conflictedPaths(applyOutput: string): string[] {
 
 export async function moveCurrent(main: string, from: Place, to: Place, log: Log): Promise<void> {
   if (from.branch === to.branch) return;
-  const unmerged = (await git(main, "diff", "--name-only", "--diff-filter=U")).stdout.split("\n").filter(Boolean);
+  const unmerged = await unmergedPaths(main);
   if (unmerged.length > 0) throw new Error(`conflit(s) non résolu(s) sur current (${unmerged.join(", ")}) : rien n'a été déplacé`);
   if (from.worktree) await syncToMain(main, from.worktree, log);
   const fromSaved = from.worktree ? await snapshot(main, "current", true) : false;
@@ -205,9 +206,33 @@ export async function moveCurrent(main: string, from: Place, to: Place, log: Log
   }
 }
 
+export async function mergeDefaultInto(root: string, branch: string, log: Log): Promise<void> {
+  const checkout = (await listWorktrees(root)).find((tree) => tree.branch === branch)?.path;
+  if (!checkout) throw new Error(`${branch} n'est extraite nulle part : rien n'a été fusionné`);
+  if ((await git(checkout, "remote")).stdout.split("\n").includes("origin")) {
+    log("git fetch origin");
+    await run("git", ["fetch", "-q", "origin"], { cwd: checkout, timeout: fetchTimeoutMs, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+  }
+  const target = await mergeTarget(checkout);
+  log(`Dans ${path.basename(checkout)} : git merge --no-edit ${target}`);
+  try {
+    await git(checkout, "merge", "--no-edit", target);
+  } catch (error) {
+    const conflicts = await unmergedPaths(checkout);
+    if (conflicts.length === 0) throw error;
+    await git(checkout, "merge", "--abort");
+    throw new Error(`conflit sur ${conflicts.join(", ")} : merge annulé, ${branch} est inchangée`);
+  }
+  log(`${target} fusionnée dans ${branch}`);
+}
+
 export function gitError(error: unknown): string {
   const stderr = (error as { stderr?: string }).stderr?.trim();
   return stderr || String(error);
+}
+
+async function unmergedPaths(cwd: string): Promise<string[]> {
+  return (await git(cwd, "diff", "--name-only", "--diff-filter=U")).stdout.split("\n").filter(Boolean);
 }
 
 async function commitSnapshot(cwd: string, label: string): Promise<void> {

@@ -225,8 +225,6 @@ describe("opening conversations", () => {
 
   const prefills = [
     { name: "a new conversation runs /worktree in a fresh Claude tab", message: (target: unknown) => ({ type: "newSession", target }), want: [[undefined, "/worktree feat/x"]] },
-    { name: "Mettre à jour pre-fills /worktree update", message: (target: unknown) => ({ type: "mergeDefault", target }), want: [[undefined, "/worktree update feat/x"]] },
-    { name: "updating every late worktree opens one tab each", message: (target: unknown) => ({ type: "mergeDefaultAll", targets: [target, { path: "/y", branch: "feat/y" }] }), want: [[undefined, "/worktree update feat/x"], [undefined, "/worktree update feat/y"]] },
   ];
   for (const tc of prefills) {
     test(tc.name, async () => {
@@ -235,6 +233,29 @@ describe("opening conversations", () => {
       f.view.send(tc.message({ path: f.worktree, branch: "feat/x" }));
       await waitFor(() => opened().length === tc.want.length);
       assert.deepEqual(opened(), tc.want);
+    });
+  }
+
+  const updates = [
+    { name: "Mettre à jour merges main in the background, without a conversation", message: (x: unknown, _y: unknown) => ({ type: "mergeDefault", target: x }), wantMerged: ["feat/x"] },
+    { name: "updating every late worktree merges them one after the other", message: (x: unknown, y: unknown) => ({ type: "mergeDefaultAll", targets: [x, y] }), wantMerged: ["feat/x", "feat/y"] },
+  ];
+  for (const tc of updates) {
+    test(tc.name, async () => {
+      const f = await fixture({ second: true });
+      write(f.root, "m", "main\n");
+      git(f.root, "add", "m");
+      git(f.root, "commit", "-qm", "main advance");
+      await until(f.view, (list) => list.filter((candidate) => candidate.behind > 0).length === 2);
+      calls.length = 0;
+      const other = path.join(path.dirname(f.worktree), "feat-y");
+      f.view.send(tc.message({ path: f.worktree, branch: "feat/x" }, { path: other, branch: "feat/y" }));
+      const merged = () => ["feat/x", "feat/y"].filter((branch) => git(f.root, "rev-list", "--count", `${branch}..main`) === "0");
+      await waitFor(() => merged().length === tc.wantMerged.length && f.view.last("transition")?.status === "done", 30000);
+      assert.deepEqual(merged(), tc.wantMerged);
+      assert.deepEqual((await refreshed(f.view)).filter((one) => !one.main && one.behind === 0).map((one) => one.branch), tc.wantMerged);
+      assert.deepEqual(opened(), []);
+      assert.equal(messages.length, 0);
     });
   }
 

@@ -80,7 +80,7 @@
   function renderLate(groups) {
     const box = el("div", "late-all");
     const button = el("button", "action", `Mettre à jour les ${groups.length} worktrees en retard sur ${defaultBranch}`);
-    button.title = `Ouvre une conversation par worktree avec /worktree update <branche> pré-rempli : Entrée pour lancer le merge de ${defaultBranch}`;
+    button.title = `Fusionne ${defaultBranch} dans chaque branche en retard, en arrière-plan, l'une après l'autre ; un conflit annule le merge de cette branche sans rien changer`;
     button.addEventListener("click", () => vscode.postMessage({ type: "mergeDefaultAll", targets: groups.map((group) => ({ path: group.path, branch: group.branch })) }));
     box.append(button);
     return box;
@@ -168,7 +168,7 @@
     if (active && group.state === "owned") actions.append(action("Aller", `Échange : la branche de current retourne dans son worktree (ou son travail est garé), ${group.branch} arrive sur current avec le travail du worktree indexé, et sa conversation s'ouvre`, "goto", group));
     if (active && group.syncError) actions.append(action("Réessayer le rapatriement", "Amène les modifs faites dans le worktree sur current, indexées (staged) ; un conflit y arrive avec ses marqueurs, à résoudre sur current", "sync", group));
     if (active && group.state === "taken") actions.append(action(`Aller sur ${defaultBranch}`, `Synchronise ce qui reste du worktree, current passe sur ${defaultBranch}, le worktree reprend ${group.branch} avec tout le travail non committé (le sien et celui fait sur current)`, "gotoDefault", group));
-    if (active && group.behind > 0) actions.append(action("Mettre à jour", `Ouvre une conversation avec /worktree update ${group.branch} pré-rempli : Entrée pour lancer le merge de ${defaultBranch}, résolution des conflits comprise`, "mergeDefault", group));
+    if (active && group.behind > 0) actions.append(action("Mettre à jour", `Fusionne ${defaultBranch} dans ${group.branch} en arrière-plan, là où la branche est extraite ; un conflit annule le merge sans rien changer`, "mergeDefault", group));
     if (active) actions.append(action("+ Conversation", "Nouvelle conversation Claude dans ce worktree : ouvre un onglet ici et lance /worktree " + group.branch, "newSession", group));
     if (chips.childElementCount === 0) chips.remove();
     if (actions.childElementCount === 0) actions.remove();

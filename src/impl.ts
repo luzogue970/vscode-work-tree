@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
 import { configDir } from "./claude";
-import { defaultBranch, gitCommonDir, gitError, listWorktrees, moveCurrent, syncToMain, visitedWorktree, type Log } from "./git";
+import { defaultBranch, gitCommonDir, gitError, listWorktrees, mergeDefaultInto, moveCurrent, syncToMain, visitedWorktree, type Log } from "./git";
 import { StateStore } from "./state";
 import { WorktreesView, worksIn, type ListedSession, type Target } from "./view";
 
@@ -32,6 +32,7 @@ export async function activate(context: vscode.ExtensionContext, dir: string, ru
     watcher.onDidDelete(refresh);
   }
   const poll = setInterval(refresh, pollMs).unref();
+  const update = (target: Target) => transition(view, target, (root, log) => mergeDefaultInto(root, target.branch, log));
   const disposables: vscode.Disposable[] = [
     ...watchers,
     { dispose: () => clearInterval(poll) },
@@ -39,9 +40,9 @@ export async function activate(context: vscode.ExtensionContext, dir: string, ru
     vscode.commands.registerCommand("worktreeHub.open", (session: ListedSession) => openSession(session)),
     vscode.commands.registerCommand("worktreeHub.openInWindow", (session: ListedSession) => openInWindow(context, session)),
     vscode.commands.registerCommand("worktreeHub.newSession", (target: Target) => prefill(`/worktree ${target.branch}`)),
-    vscode.commands.registerCommand("worktreeHub.mergeDefault", (target: Target) => prefill(`/worktree update ${target.branch}`)),
+    vscode.commands.registerCommand("worktreeHub.mergeDefault", update),
     vscode.commands.registerCommand("worktreeHub.mergeDefaultAll", async (targets: Target[]) => {
-      for (const target of targets) await prefill(`/worktree update ${target.branch}`);
+      for (const target of targets) await update(target);
     }),
     vscode.commands.registerCommand("worktreeHub.goto", (target: Target) => goto(view, target)),
     vscode.commands.registerCommand("worktreeHub.gotoDefault", (target: Target) => transition(view, target, async (root, log) => {
