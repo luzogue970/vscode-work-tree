@@ -436,6 +436,21 @@ describe("WorktreesView refresh", () => {
     assert.equal(fake.posted.filter((m) => m.type === "data").length, 2);
   });
 
+  test("a disposed view posts nothing, not even from a refresh already running", async () => {
+    const root = initRepo();
+    state.workspaceFolders = [root];
+    process.env.CLAUDE_CONFIG_DIR = tempDir("cfg");
+    const view = new WorktreesView({ fsPath: "/media" } as never, running, new StateStore(new Memento()));
+    const fake = new FakeWebviewView();
+    view.resolveWebviewView(fake as never);
+    const inFlight = view.refresh(true);
+    view.dispose();
+    await inFlight;
+    await view.refresh(true);
+    view.transition(root, ["late"], "done");
+    assert.deepEqual(fake.posted.filter((m) => m.type === "data" || m.type === "transition"), []);
+  });
+
   test("becoming visible refreshes", async () => {
     const root = initRepo();
     state.workspaceFolders = [root];

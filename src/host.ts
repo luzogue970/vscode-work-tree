@@ -9,6 +9,7 @@ export class Host implements vscode.WebviewViewProvider, vscode.Disposable {
   private current: Loaded | undefined;
   private view: vscode.WebviewView | undefined;
   private available: Build | undefined;
+  private updating = false;
 
   constructor(private readonly context: vscode.ExtensionContext, private running: Build) {}
 
@@ -39,16 +40,19 @@ export class Host implements vscode.WebviewViewProvider, vscode.Disposable {
 
   async update(): Promise<void> {
     const target = this.available;
-    if (!target) return;
+    if (!target || this.updating) return;
     if (target.contributes !== this.running.contributes) {
       await confirmRestart(`La v${target.version} change les contributions de l'extension (commandes, vues, réglages) : seul un redémarrage des extensions peut la charger, ce qui coupe les conversations Claude Code en cours.`);
       return;
     }
+    this.updating = true;
     try {
       await this.load(target);
       await this.check();
     } catch (error) {
       await confirmRestart(`Rechargement à chaud impossible (${String(error)}).`);
+    } finally {
+      this.updating = false;
     }
   }
 

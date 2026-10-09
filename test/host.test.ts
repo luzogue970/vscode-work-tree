@@ -66,6 +66,24 @@ describe("Host", () => {
     });
   }
 
+  test("a second hot load requested while one is running is ignored", async () => {
+    const exts = tempDir("exts");
+    const dir = installedCopy(exts, "mathieulp.worktree-hub-1.0.0", "1.0.0", "2026-01-01T00:00:00Z");
+    state.workspaceFolders = [initRepo()];
+    const host = new Host(makeContext(dir, "1.0.0") as never, (await readBuild(dir)) as never);
+    await host.load((await readBuild(dir)) as never);
+    installedCopy(exts, "mathieulp.worktree-hub-1.1.0", "1.1.0", "2026-06-01T00:00:00Z");
+    await host.check();
+    await Promise.all([host.update(), host.update()]);
+    assert.equal(messages.some((message) => message.kind === "warning"), false);
+    const view = new FakeWebviewView();
+    host.resolveWebviewView(view as never);
+    view.send({ type: "ready" });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal((view.last("data") as { running: { version: string } }).running.version, "1.1.0");
+    host.dispose();
+  });
+
   test("a confirmed restart executes the extension host restart", async () => {
     const exts = tempDir("exts");
     const dir = installedCopy(exts, "mathieulp.worktree-hub-1.0.0", "1.0.0", "2026-01-01T00:00:00Z");

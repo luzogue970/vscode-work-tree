@@ -103,6 +103,7 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
 
   dispose(): void {
     for (const listener of this.listeners.splice(0)) listener.dispose();
+    this.view = undefined;
   }
 
   transition(path: string, lines: string[], status: "running" | "done" | "error"): void {
@@ -120,6 +121,7 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
     const webview = this.view.webview;
     if (force) await webview.postMessage({ type: "loading" });
     const payload = force ? await vscode.window.withProgress({ location: { viewId: WorktreesView.id } }, () => this.load()) : await this.load();
+    if (this.view?.webview !== webview) return;
     const serialized = JSON.stringify(payload);
     if (!force && serialized === this.lastPosted) return;
     this.lastPosted = serialized;

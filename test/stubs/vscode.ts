@@ -52,6 +52,7 @@ export class Disposable {
 
 export const commands = {
   registerCommand(command: string, handler: (...args: unknown[]) => unknown): Disposable {
+    if (handlers.has(command)) throw new Error(`command '${command}' already exists`);
     handlers.set(command, handler);
     return new Disposable(() => handlers.delete(command));
   },
