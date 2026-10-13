@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
 import { listRepoSessions, liveSessions, mirrorTranscripts, projectDir, scanWorktreeEntries, type Session } from "./claude";
-import { behindCount, countChanges, defaultBranch, gitError, isMerged, listBranches, listWorktrees, mergeTarget, syncToMain, visitedWorktree, worktreeName } from "./git";
+import { behindCount, countChanges, defaultBranch, fetchOrigin, gitError, isMerged, listBranches, listWorktrees, mergeTarget, syncToMain, visitedWorktree, worktreeName } from "./git";
 import type { StateStore } from "./state";
 
 export interface Target {
@@ -54,6 +54,8 @@ type Incoming =
   | { type: "mergeDefault"; target: Target }
   | { type: "mergeDefaultAll"; targets: Target[] };
 
+const fetchEveryMs = 5 * 60_000;
+
 const commands: Record<Exclude<Incoming["type"], "ready" | "refresh">, string> = {
   update: "worktreeHub.update",
   open: "worktreeHub.open",
@@ -74,6 +76,8 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
   private readonly listeners: vscode.Disposable[] = [];
   private queue: Promise<unknown> = Promise.resolve();
   private readonly syncErrors = new Map<string, string>();
+  private fetchedAt = 0;
+  private fetching: Promise<void> | undefined;
 
   constructor(private readonly media: vscode.Uri, private readonly running: Build, private readonly store: StateStore) {}
 
@@ -120,7 +124,7 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
     if (!this.view) return;
     const webview = this.view.webview;
     if (force) await webview.postMessage({ type: "loading" });
-    const payload = force ? await vscode.window.withProgress({ location: { viewId: WorktreesView.id } }, () => this.load()) : await this.load();
+    const payload = force ? await vscode.window.withProgress({ location: { viewId: WorktreesView.id } }, () => this.load(true)) : await this.load();
     if (this.view?.webview !== webview) return;
     const serialized = JSON.stringify(payload);
     if (!force && serialized === this.lastPosted) return;
@@ -128,9 +132,10 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
     await webview.postMessage({ type: "data", running: this.running, update: this.update, refreshedAt: Date.now(), ...payload });
   }
 
-  async load(): Promise<Payload> {
+  async load(force = false): Promise<Payload> {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) return { groups: [], error: "Aucun dossier ouvert" };
+    this.fetchInBackground(root, force);
     try {
       await this.exclusive(() => this.bringBack(root));
       const groups = await buildGroups(root, this.store);
@@ -139,6 +144,14 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
     } catch (error) {
       return { groups: [], error: String(error) };
     }
+  }
+
+  private fetchInBackground(root: string, force: boolean): void {
+    if (this.fetching || (!force && Date.now() - this.fetchedAt < fetchEveryMs)) return;
+    this.fetchedAt = Date.now();
+    this.fetching = fetchOrigin(root)
+      .catch(() => undefined)
+      .finally(() => (this.fetching = undefined));
   }
 
   exclusive<T>(task: () => Promise<T>): Promise<T> {

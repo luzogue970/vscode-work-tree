@@ -6,6 +6,9 @@ avec les conversations Claude regroupées par worktree git. Un clic ouvre la con
 ## Ce qu'elle lit
 
 - `git worktree list --porcelain` dans le dossier ouvert.
+- `git fetch --prune origin` en arrière-plan, à chaque actualisation et au plus toutes les 5 min
+  sinon : une branche supprimée sur GitHub après sa PR, ou dont tous les commits sont déjà sur la
+  branche par défaut (merge par rebase), part dans "Archivés", replié par défaut comme ses worktrees.
 - Les transcripts `~/.claude/projects/<dossier>/*.jsonl` de chaque worktree : `cwd`, `gitBranch`,
   titre (`customTitle`, `aiTitle`, `lastPrompt`, premier message).
 - Le clic appelle la commande interne `claude-vscode.editor.open` avec l'id de session. Non

@@ -73,15 +73,17 @@ export async function mergeTarget(cwd: string): Promise<string> {
   }
 }
 
-// A tip sitting on the target's first-parent line is a fresh or stale branch, not a merged one.
+// GitHub's rebase merge leaves patch-equivalent commits ("-" in git cherry); a tip on the target's first-parent line is fresh or stale, not merged.
 export async function isMerged(cwd: string, branch: string, target: string): Promise<boolean> {
   const track = (await git(cwd, "for-each-ref", "--format=%(upstream:track)", `refs/heads/${branch}`)).stdout.trim();
   if (track === "[gone]") return true;
+  let ahead: string[];
   try {
-    await git(cwd, "merge-base", "--is-ancestor", branch, target);
+    ahead = (await git(cwd, "cherry", target, branch)).stdout.split("\n").filter(Boolean);
   } catch {
     return false;
   }
+  if (ahead.length > 0) return ahead.every((line) => line.startsWith("-"));
   const tip = (await git(cwd, "rev-parse", branch)).stdout.trim();
   const firstParents = (await git(cwd, "rev-list", "--first-parent", target)).stdout;
   return !firstParents.includes(tip);
@@ -206,13 +208,16 @@ export async function moveCurrent(main: string, from: Place, to: Place, log: Log
   }
 }
 
+export async function fetchOrigin(cwd: string, log: Log = () => undefined): Promise<void> {
+  if (!(await git(cwd, "remote")).stdout.split("\n").includes("origin")) return;
+  log("git fetch --prune origin");
+  await run("git", ["fetch", "-q", "--prune", "origin"], { cwd, timeout: fetchTimeoutMs, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+}
+
 export async function mergeDefaultInto(root: string, branch: string, log: Log): Promise<void> {
   const checkout = (await listWorktrees(root)).find((tree) => tree.branch === branch)?.path;
   if (!checkout) throw new Error(`${branch} n'est extraite nulle part : rien n'a été fusionné`);
-  if ((await git(checkout, "remote")).stdout.split("\n").includes("origin")) {
-    log("git fetch origin");
-    await run("git", ["fetch", "-q", "origin"], { cwd: checkout, timeout: fetchTimeoutMs, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
-  }
+  await fetchOrigin(checkout, log);
   const target = await mergeTarget(checkout);
   log(`Dans ${path.basename(checkout)} : git merge --no-edit ${target}`);
   try {

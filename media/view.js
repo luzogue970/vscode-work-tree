@@ -91,7 +91,7 @@
     if (state.archiveCollapsed !== false) section.classList.add("collapsed");
     const header = el("header", "archive-header");
     header.append(el("span", "chevron"), el("span", "name", "Archivés"), el("span", "count", String(groups.length)));
-    header.title = "Worktrees dont la branche est fusionnée ou qui n'existent plus, avec leurs conversations";
+    header.title = "Worktrees dont la branche est fusionnée (supprimée sur origin après la PR, ou ses commits déjà sur la branche par défaut) ou qui n'existent plus, avec leurs conversations";
     header.addEventListener("click", () => {
       state.archiveCollapsed = !section.classList.toggle("collapsed") ? false : true;
       vscode.setState(state);
@@ -121,10 +121,11 @@
   }
 
   function renderGroup(group) {
-    const section = el("section", `group ${group.state}${group.main ? " main" : ""}${group.current ? " current" : ""}${group.merged && !group.current ? " merged" : ""}`);
+    const archived = group.merged && !group.current;
+    const section = el("section", `group ${group.state}${group.main ? " main" : ""}${group.current ? " current" : ""}${archived ? " merged" : ""}`);
     section.dataset.path = group.path;
     section.style.setProperty("--wt-accent-hue", String(hue(group.branch)));
-    if (state.collapsed[group.path]) section.classList.add("collapsed");
+    if (state.collapsed[group.path] ?? archived) section.classList.add("collapsed");
 
     const header = el("header", "group-header");
     header.title = group.path;
@@ -177,9 +178,8 @@
     if (transitions[group.path]) section.append(renderTransition(transitions[group.path]));
     if (group.main) return section;
     header.addEventListener("click", () => {
-      state.collapsed[group.path] = !state.collapsed[group.path];
+      state.collapsed[group.path] = section.classList.toggle("collapsed");
       vscode.setState(state);
-      section.classList.toggle("collapsed");
     });
 
     const list = el("ul", "sessions");

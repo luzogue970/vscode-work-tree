@@ -69,6 +69,8 @@ describe("isMerged", () => {
     { name: "open branch", branch: "feat/open", want: false },
     { name: "stale branch on an old main commit", branch: "feat/stale", want: false },
     { name: "upstream gone after fetch --prune", branch: "feat/squashed", want: true },
+    { name: "every commit rebased onto main", branch: "feat/rebased", want: true },
+    { name: "only part of the commits rebased onto main", branch: "feat/partial", want: false },
     { name: "unknown branch", branch: "nope", want: false },
   ];
   test("table", async (t) => {
@@ -89,6 +91,15 @@ describe("isMerged", () => {
     git(root, "push", "-qu", "origin", "feat/squashed");
     git(root, "push", "-q", "origin", "--delete", "feat/squashed");
     git(root, "fetch", "-qp");
+    branchWithCommit(root, "feat/rebased", "k", "r");
+    branchWithCommit(root, "feat/partial", "l", "p");
+    git(root, "commit", "-q", "--allow-empty", "-m", "main moved on");
+    git(root, "cherry-pick", "feat/rebased", "feat/partial");
+    git(root, "switch", "-q", "feat/partial");
+    write(root, "n", "unmerged");
+    git(root, "add", "n");
+    git(root, "commit", "-qm", "not merged");
+    git(root, "switch", "-q", "main");
     const target = await mergeTarget(root);
     for (const tc of cases) await t.test(tc.name, async () => assert.equal(await isMerged(root, tc.branch, target), tc.want));
   });

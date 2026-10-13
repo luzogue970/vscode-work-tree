@@ -408,11 +408,36 @@ describe("moving branches from the view", () => {
     assert.equal(git(f.worktree, "branch", "--show-current"), "feat/x");
   });
 
-  test("a merged worktree is flagged", async () => {
-    const f = await fixture();
-    git(f.root, "merge", "-q", "--no-ff", "-m", "merge", "feat/x");
-    await until(f.view, () => group(f.view, "feat-x").merged);
-  });
+  const mergedCases = [
+    {
+      name: "merge commit",
+      merge: (root: string) => git(root, "merge", "-q", "--no-ff", "-m", "merge", "feat/x"),
+    },
+    {
+      name: "commits rebased onto main",
+      merge: (root: string) => {
+        git(root, "commit", "-q", "--allow-empty", "-m", "main moved on");
+        git(root, "cherry-pick", "feat/x");
+      },
+    },
+    {
+      name: "branch deleted on origin after its pull request",
+      merge: (root: string) => {
+        const remote = tempDir("remote");
+        git(remote, "init", "-q", "--bare");
+        git(root, "remote", "add", "origin", remote);
+        git(root, "push", "-qu", "origin", "feat/x");
+        git(remote, "branch", "-D", "feat/x");
+      },
+    },
+  ];
+  for (const tc of mergedCases) {
+    test(`a merged worktree is flagged: ${tc.name}`, async () => {
+      const f = await fixture();
+      tc.merge(f.root);
+      await until(f.view, () => group(f.view, "feat-x").merged);
+    });
+  }
 });
 
 describe("WorktreesView refresh", () => {
