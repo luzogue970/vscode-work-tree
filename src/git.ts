@@ -18,6 +18,7 @@ export interface Place {
 export type Log = (line: string) => void;
 
 const snapshotTrailer = "Worktree-Hub-Snapshot";
+const stagedTrailer = "Worktree-Hub-Staged";
 const parkPrefix = "worktree-hub:park:";
 const maxOutput = 512 * 1024 * 1024;
 const fetchTimeoutMs = 60_000;
@@ -102,21 +103,25 @@ export async function countChanges(cwd: string): Promise<number> {
   return stdout.split("\n").filter(Boolean).length;
 }
 
+// The index gets its own commit under the rest, so unwinding gives back what was staged, unstaged and untracked.
 export async function snapshot(cwd: string, label: string, includeUntracked: boolean): Promise<boolean> {
-  const { stdout } = await git(cwd, "status", "--porcelain", includeUntracked ? "--untracked-files=all" : "--untracked-files=no");
-  if (!stdout.trim()) return false;
+  const staged = (await unmergedPaths(cwd)).length === 0 && (await hasStagedChanges(cwd));
+  if (staged) await commitSnapshot(cwd, stagedTrailer, label);
   await git(cwd, "add", includeUntracked ? "-A" : "-u");
-  await commitSnapshot(cwd, label);
-  return true;
+  const rest = await hasStagedChanges(cwd);
+  if (rest) await commitSnapshot(cwd, snapshotTrailer, label);
+  return staged || rest;
 }
 
 export async function unwindSnapshots(cwd: string): Promise<number> {
   let count = 0;
-  while ((await git(cwd, "log", "-1", "--format=%B")).stdout.includes(`\n${snapshotTrailer}:`)) {
-    await git(cwd, "reset", "-q", "HEAD~1");
+  for (;;) {
+    const body = (await git(cwd, "log", "-1", "--format=%B")).stdout;
+    const mode = body.includes(`\n${snapshotTrailer}:`) ? "--mixed" : body.includes(`\n${stagedTrailer}:`) ? "--soft" : undefined;
+    if (!mode) return count;
+    await git(cwd, "reset", "-q", mode, "HEAD~1");
     count++;
   }
-  return count;
 }
 
 export async function park(cwd: string, branch: string): Promise<boolean> {
@@ -157,7 +162,7 @@ export async function syncToMain(main: string, worktree: string, log: Log, keepC
     await git(worktree, "reset", "-q");
     throw error;
   }
-  await commitSnapshot(worktree, `${name} sync`);
+  await commitSnapshot(worktree, snapshotTrailer, `${name} sync`);
   if (conflicts.length > 0) log(`Conflit(s) laissé(s) sur current, à résoudre : ${conflicts.join(", ")}`);
   else log("Modifications indexées (staged) sur current ; repère posé dans le worktree, hors branche");
   return true;
@@ -173,12 +178,12 @@ export async function moveCurrent(main: string, from: Place, to: Place, log: Log
   if (unmerged.length > 0) throw new Error(`conflit(s) non résolu(s) sur current (${unmerged.join(", ")}) : rien n'a été déplacé`);
   if (from.worktree) await syncToMain(main, from.worktree, log);
   const fromSaved = from.worktree ? await snapshot(main, "current", true) : false;
-  if (fromSaved) log(`Travail de current mis de côté sur ${from.branch} (commit wip temporaire)`);
+  if (fromSaved) log(`Travail de current mis de côté sur ${from.branch} (commits wip temporaires, l'index à part)`);
   const parked = from.worktree ? false : await park(main, from.branch);
   if (parked) log(`Travail non committé de ${from.branch} garé (stash ${parkPrefix}${from.branch})`);
   const toSaved = to.worktree ? await snapshot(to.worktree, path.basename(to.worktree), true) : false;
   if (to.worktree) {
-    if (toSaved) log(`Travail de ${path.basename(to.worktree)} mis de côté (commit wip temporaire)`);
+    if (toSaved) log(`Travail de ${path.basename(to.worktree)} mis de côté (commits wip temporaires, l'index à part)`);
     log(`Détachement de ${path.basename(to.worktree)} : git switch --detach`);
     await git(to.worktree, "switch", "--detach");
   }
@@ -191,20 +196,20 @@ export async function moveCurrent(main: string, from: Place, to: Place, log: Log
       await git(to.worktree, "switch", to.branch);
       await unwindSnapshots(to.worktree);
     }
-    if (fromSaved) await git(main, "reset", "-q", "--soft", "HEAD~1");
+    if (fromSaved) await unwindSnapshots(main);
     if (parked) await restorePark(main, from.branch);
     throw error;
   }
   if (toSaved) {
-    await git(main, "reset", "-q", "--soft", "HEAD~1");
-    log(`Travail du worktree indexé (staged) sur current, ${to.branch} reste sur son dernier vrai commit`);
+    await unwindSnapshots(main);
+    log(`Travail du worktree restauré sur current tel quel (indexé, non indexé, non suivi), ${to.branch} reste sur son dernier vrai commit`);
   }
   if (!to.worktree && (await restorePark(main, to.branch))) log(`Travail garé de ${to.branch} restauré`);
   if (from.worktree) {
     log(`${path.basename(from.worktree)} reprend ${from.branch}`);
     await git(from.worktree, "switch", from.branch);
     const unwound = await unwindSnapshots(from.worktree);
-    if (unwound > 0) log(`${unwound} commit(s) "wip" défait(s) : le travail redevient non committé dans ${path.basename(from.worktree)}`);
+    if (unwound > 0) log(`${unwound} commit(s) "wip" défait(s) : le travail redevient non committé dans ${path.basename(from.worktree)}, indexé ou non comme sur current`);
   }
 }
 
@@ -240,8 +245,12 @@ async function unmergedPaths(cwd: string): Promise<string[]> {
   return (await git(cwd, "diff", "--name-only", "--diff-filter=U")).stdout.split("\n").filter(Boolean);
 }
 
-async function commitSnapshot(cwd: string, label: string): Promise<void> {
-  await git(cwd, "commit", "-q", "--no-verify", "-m", "wip", "-m", `${snapshotTrailer}: ${label}`);
+async function hasStagedChanges(cwd: string): Promise<boolean> {
+  return (await git(cwd, "diff", "--cached", "--name-only")).stdout.trim() !== "";
+}
+
+async function commitSnapshot(cwd: string, trailer: string, label: string): Promise<void> {
+  await git(cwd, "commit", "-q", "--no-verify", "-m", "wip", "-m", `${trailer}: ${label}`);
 }
 
 function git(cwd: string, ...args: string[]): Promise<{ stdout: string; stderr: string }> {

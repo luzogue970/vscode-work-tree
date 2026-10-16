@@ -166,9 +166,9 @@
       chips.append(late);
     }
 
-    if (active && group.state === "owned") actions.append(action("Aller", `Échange : la branche de current retourne dans son worktree (ou son travail est garé), ${group.branch} arrive sur current avec le travail du worktree indexé, et sa conversation s'ouvre`, "goto", group));
+    if (active && group.state === "owned") actions.append(action("Aller", `Échange : la branche de current retourne dans son worktree (ou son travail est garé), ${group.branch} arrive sur current avec le travail du worktree tel quel (indexé, non indexé, non suivi), et sa conversation s'ouvre`, "goto", group));
     if (active && group.syncError) actions.append(action("Réessayer le rapatriement", "Amène les modifs faites dans le worktree sur current, indexées (staged) ; un conflit y arrive avec ses marqueurs, à résoudre sur current", "sync", group));
-    if (active && group.state === "taken") actions.append(action(`Aller sur ${defaultBranch}`, `Synchronise ce qui reste du worktree, current passe sur ${defaultBranch}, le worktree reprend ${group.branch} avec tout le travail non committé (le sien et celui fait sur current)`, "gotoDefault", group));
+    if (active && group.state === "taken") actions.append(action(`Aller sur ${defaultBranch}`, `Synchronise ce qui reste du worktree, current passe sur ${defaultBranch}, le worktree reprend ${group.branch} avec tout le travail non committé (le sien et celui fait sur current), indexé ou non comme sur current`, "gotoDefault", group));
     if (active && group.behind > 0) actions.append(action("Mettre à jour", `Fusionne ${defaultBranch} dans ${group.branch} en arrière-plan, là où la branche est extraite ; un conflit annule le merge sans rien changer`, "mergeDefault", group));
     if (active) actions.append(action("+ Conversation", "Nouvelle conversation Claude dans ce worktree : ouvre un onglet ici et lance /worktree " + group.branch, "newSession", group));
     if (chips.childElementCount === 0) chips.remove();

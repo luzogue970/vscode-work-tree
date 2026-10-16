@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import * as path from "node:path";
 import { describe, test } from "node:test";
 import { behindCount, countChanges, defaultBranch, gitCommonDir, gitError, isMerged, listBranches, listWorktrees, mergeDefaultInto, mergeTarget, moveCurrent, park, restorePark, snapshot, syncToMain, unwindSnapshots } from "../src/git";
@@ -122,20 +122,27 @@ describe("countChanges", () => {
 
 describe("snapshot and unwindSnapshots", () => {
   const cases = [
-    { name: "nothing to commit", change: () => undefined, untracked: true, saved: false, files: [] as string[] },
-    { name: "tracked change with untracked files included", change: (root: string) => { write(root, "f", "x"); write(root, "n", "y"); }, untracked: true, saved: true, files: ["f", "n"] },
-    { name: "tracked only leaves untracked files behind", change: (root: string) => { write(root, "f", "x"); write(root, "n", "y"); }, untracked: false, saved: true, files: ["f"] },
-    { name: "untracked only without inclusion is nothing", change: (root: string) => write(root, "n", "y"), untracked: false, saved: false, files: [] },
+    { name: "nothing to commit", change: () => undefined, untracked: true, commits: [] as { trailer: string; files: string[] }[] },
+    { name: "tracked change with untracked files included", change: (root: string) => { write(root, "f", "x"); write(root, "n", "y"); }, untracked: true, commits: [{ trailer: "Worktree-Hub-Snapshot", files: ["f", "n"] }] },
+    { name: "tracked only leaves untracked files behind", change: (root: string) => { write(root, "f", "x"); write(root, "n", "y"); }, untracked: false, commits: [{ trailer: "Worktree-Hub-Snapshot", files: ["f"] }] },
+    { name: "untracked only without inclusion is nothing", change: (root: string) => write(root, "n", "y"), untracked: false, commits: [] },
+    { name: "the index gets its own commit under the rest", change: (root: string) => { write(root, "s", "staged"); git(root, "add", "s"); write(root, "f", "x"); }, untracked: true, commits: [{ trailer: "Worktree-Hub-Staged", files: ["s"] }, { trailer: "Worktree-Hub-Snapshot", files: ["f"] }] },
+    { name: "a fully staged tree needs only the index commit", change: (root: string) => { write(root, "f", "x"); git(root, "add", "f"); }, untracked: true, commits: [{ trailer: "Worktree-Hub-Staged", files: ["f"] }] },
+    { name: "an index with unmerged paths goes with the rest", change: (root: string) => { branchWithCommit(root, "other", "f", "other\n"); write(root, "f", "mine\n"); git(root, "commit", "-qam", "mine"); assert.throws(() => git(root, "merge", "-q", "other")); }, untracked: true, commits: [{ trailer: "Worktree-Hub-Snapshot", files: ["f"] }] },
   ];
   for (const tc of cases) {
     test(tc.name, async () => {
       const root = initRepo();
       tc.change(root);
-      assert.equal(await snapshot(root, "label", tc.untracked), tc.saved);
-      if (!tc.saved) return;
-      assert.equal(git(root, "log", "-1", "--format=%s"), "wip");
-      assert.match(git(root, "log", "-1", "--format=%b"), /Worktree-Hub-Snapshot: label/);
-      assert.deepEqual(git(root, "show", "--name-only", "--format=", "HEAD").split("\n").sort(), tc.files);
+      const tip = git(root, "rev-parse", "HEAD");
+      assert.equal(await snapshot(root, "label", tc.untracked), tc.commits.length > 0);
+      for (const [index, commit] of tc.commits.entries()) {
+        const rev = `HEAD~${tc.commits.length - 1 - index}`;
+        assert.equal(git(root, "log", "-1", "--format=%s", rev), "wip");
+        assert.match(git(root, "log", "-1", "--format=%b", rev), new RegExp(`${commit.trailer}: label`));
+        assert.deepEqual(git(root, "show", "--name-only", "--format=", rev).split("\n").sort(), commit.files);
+      }
+      assert.equal(git(root, "rev-parse", `HEAD~${tc.commits.length}`), tip);
     });
   }
 
@@ -173,6 +180,10 @@ function status(cwd: string): string {
   return git(cwd, "status", "--porcelain", "--untracked-files=all");
 }
 
+function gitState(cwd: string): string {
+  return [status(cwd), git(cwd, "diff", "--cached"), git(cwd, "diff")].join("\n---\n");
+}
+
 function setupTaken(): { root: string; worktree: string } {
   const root = initRepo();
   branchWithCommit(root, "feat/x", "g", "x");
@@ -188,20 +199,22 @@ function setupTwo(): { root: string; x: string; y: string } {
 }
 
 describe("moveCurrent from main to a worktree", () => {
-  test("the worktree's work lands staged on current, with no commit on the branch", async () => {
+  test("the worktree's work lands on current in its git state, with no commit on the branch", async () => {
     const { root, worktree } = setupTaken();
     const tip = git(root, "rev-parse", "feat/x");
     write(worktree, "g", "edited");
+    write(worktree, "s", "staged");
+    git(worktree, "add", "s");
     write(worktree, "new", "n");
+    const before = gitState(worktree);
     const lines: string[] = [];
     await moveCurrent(root, { branch: "main" }, { branch: "feat/x", worktree }, (line) => lines.push(line));
     assert.equal(git(root, "branch", "--show-current"), "feat/x");
     assert.equal(git(root, "rev-parse", "feat/x"), tip);
-    assert.deepEqual(staged(root), ["g", "new"]);
-    assert.equal(git(root, "diff", "--name-only"), "");
+    assert.equal(gitState(root), before);
     assert.equal(git(worktree, "branch", "--show-current"), "");
     assert.equal(status(worktree), "");
-    assert.match(lines.join("\n"), /git switch feat\/x[\s\S]*staged/);
+    assert.match(lines.join("\n"), /git switch feat\/x[\s\S]*tel quel/);
   });
 
   test("main's uncommitted work is parked, then restored as it was on the way back", async () => {
@@ -255,7 +268,7 @@ describe("moveCurrent from main to a worktree", () => {
 });
 
 describe("moveCurrent between two worktrees", () => {
-  test("Aller swaps: current's branch goes back to its worktree with current's work, the target comes in staged", async () => {
+  test("Aller swaps: current's branch goes back to its worktree with current's work, the target comes in as it was", async () => {
     const { root, x, y } = setupTwo();
     await moveCurrent(root, { branch: "main" }, { branch: "feat/x", worktree: x }, quiet);
     write(root, "made-on-current", "c");
@@ -264,12 +277,11 @@ describe("moveCurrent between two worktrees", () => {
     const lines: string[] = [];
     await moveCurrent(root, { branch: "feat/x", worktree: x }, { branch: "feat/y", worktree: y }, (line) => lines.push(line));
     assert.equal(git(root, "branch", "--show-current"), "feat/y");
-    assert.deepEqual(staged(root), ["y-work"]);
+    assert.equal(status(root), "?? y-work");
     assert.equal(git(root, "log", "-1", "--format=%s"), "commit on feat/y");
     assert.equal(git(x, "branch", "--show-current"), "feat/x");
     assert.equal(git(x, "log", "-1", "--format=%s"), "commit on feat/x");
-    const xStatus = status(x);
-    for (const file of ["made-on-current", "pending-in-x"]) assert.match(xStatus, new RegExp(`\\?\\? ${file}`));
+    assert.equal(status(x), "A  pending-in-x\n?? made-on-current");
     assert.equal(git(y, "branch", "--show-current"), "");
     assert.match(lines.join("\n"), /feat-x reprend feat\/x/);
   });
@@ -301,9 +313,7 @@ describe("moveCurrent between two worktrees", () => {
     assert.equal(git(worktree, "branch", "--show-current"), "feat/x");
     assert.equal(git(worktree, "log", "-1", "--format=%s"), "commit on feat/x");
     assert.equal(readFileSync(path.join(worktree, "g"), "utf8"), "edited");
-    const worktreeStatus = status(worktree);
-    for (const file of ["c", "new", "pending"]) assert.match(worktreeStatus, new RegExp(`\\?\\? ${file}`));
-    assert.match(worktreeStatus, /M g/);
+    assert.equal(status(worktree), "A  c\n M g\nA  pending\n?? new");
   });
 
   test("current keeps the branch and its work when the switch to main is refused", async () => {
@@ -311,12 +321,36 @@ describe("moveCurrent between two worktrees", () => {
     await moveCurrent(root, { branch: "main" }, { branch: "feat/x", worktree }, quiet);
     write(root, "g", "edited on current");
     write(root, "blocker", "untracked on current");
+    const before = gitState(root);
     await assert.rejects(moveCurrent(root, { branch: "feat/x", worktree }, { branch: "does-not-exist" }, quiet), (error: unknown) => /does-not-exist/.test(gitError(error)));
     assert.equal(git(root, "branch", "--show-current"), "feat/x");
     assert.equal(git(root, "log", "-1", "--format=%s"), "commit on feat/x");
     assert.equal(readFileSync(path.join(root, "g"), "utf8"), "edited on current");
-    assert.deepEqual(staged(root), ["blocker", "g"]);
+    assert.equal(gitState(root), before);
   });
+});
+
+describe("a round trip through the worktree gives current its git state back", () => {
+  const cases = [
+    { name: "staged new file", change: (cwd: string) => { write(cwd, "s", "staged"); git(cwd, "add", "s"); } },
+    { name: "staged then further edited file", change: (cwd: string) => { write(cwd, "f", "staged\n"); git(cwd, "add", "f"); write(cwd, "f", "staged\nthen unstaged\n"); } },
+    { name: "staged deletion", change: (cwd: string) => git(cwd, "rm", "-q", "f") },
+    { name: "unstaged deletion", change: (cwd: string) => rmSync(path.join(cwd, "f")) },
+    { name: "staged, unstaged and untracked together", change: (cwd: string) => { write(cwd, "s", "staged"); git(cwd, "add", "s"); write(cwd, "g", "unstaged"); write(cwd, "u", "untracked"); } },
+  ];
+  for (const tc of cases) {
+    test(tc.name, async () => {
+      const { root, worktree } = setupTaken();
+      await moveCurrent(root, { branch: "main" }, { branch: "feat/x", worktree }, quiet);
+      tc.change(root);
+      const before = gitState(root);
+      await moveCurrent(root, { branch: "feat/x", worktree }, { branch: "main" }, quiet);
+      assert.equal(gitState(worktree), before);
+      await moveCurrent(root, { branch: "main" }, { branch: "feat/x", worktree }, quiet);
+      assert.equal(gitState(root), before);
+      assert.equal(git(root, "log", "-1", "--format=%s"), "commit on feat/x");
+    });
+  }
 });
 
 describe("syncToMain", () => {
@@ -330,6 +364,7 @@ describe("syncToMain", () => {
     test(tc.name, async () => {
       const { root, worktree } = setupTaken();
       write(worktree, "first", "from aller");
+      git(worktree, "add", "first");
       await moveCurrent(root, { branch: "main" }, { branch: "feat/x", worktree }, quiet);
       const branchTip = git(root, "rev-parse", "feat/x");
       const before = staged(root);

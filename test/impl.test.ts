@@ -287,10 +287,10 @@ describe("moving branches from the view", () => {
 
     const goto = await transition(f.view, { type: "goto", target });
     assert.equal(goto.status, "done");
-    assert.match(goto.lines.join("\n"), /git switch feat\/x[\s\S]*staged/);
+    assert.match(goto.lines.join("\n"), /git switch feat\/x[\s\S]*tel quel/);
     assert.equal(git(f.root, "branch", "--show-current"), "feat/x");
     assert.equal(git(f.root, "log", "-1", "--format=%s"), "commit on feat/x");
-    assert.equal(git(f.root, "diff", "--cached", "--name-only"), "n");
+    assert.equal(git(f.root, "status", "--porcelain"), "?? n");
     assert.equal(group(f.view, "feat-x").state, "taken");
     assert.equal(group(f.view, "feat-x").home, f.root);
     assert.deepEqual(groups(f.view).map((candidate) => [candidate.name, candidate.current]), [["feat-x", true]]);
@@ -302,7 +302,7 @@ describe("moving branches from the view", () => {
     write(f.worktree, "bg", "background work");
     await until(f.view, () => git(f.root, "diff", "--cached", "--name-only").includes("bg"));
     assert.equal(readFileSync(path.join(f.root, "bg"), "utf8"), "background work");
-    assert.deepEqual(git(f.root, "diff", "--cached", "--name-only").split("\n"), ["bg", "n"]);
+    assert.equal(git(f.root, "status", "--porcelain"), "A  bg\n?? n");
     assert.equal(git(f.worktree, "status", "--porcelain"), "");
     assert.equal(git(f.root, "log", "-1", "--format=%s"), "commit on feat/x");
 
@@ -312,9 +312,7 @@ describe("moving branches from the view", () => {
     assert.equal(git(f.root, "branch", "--show-current"), "main");
     assert.equal(group(f.view, "feat-x").state, "owned");
     assert.deepEqual(groups(f.view).map((candidate) => [candidate.main, candidate.current]), [[true, true], [false, false]]);
-    const worktreeStatus = git(f.worktree, "status", "--porcelain");
-    assert.match(worktreeStatus, /\?\? bg/);
-    assert.match(worktreeStatus, /\?\? n/);
+    assert.equal(git(f.worktree, "status", "--porcelain"), "A  bg\n?? n");
   });
 
   test("work landing in the visited worktree is brought back to current on its own", async () => {
