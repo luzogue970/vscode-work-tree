@@ -353,6 +353,50 @@ describe("a round trip through the worktree gives current its git state back", (
   }
 });
 
+describe("files ignored only by the branch leaving current follow it", () => {
+  const cases = [
+    { name: "Aller sur main puts them in the worktree of the branch", to: (y: string): { branch: string; worktree?: string } => ({ branch: "main" }) },
+    { name: "Aller to another worktree puts them in the worktree of the leaving branch", to: (y: string): { branch: string; worktree?: string } => ({ branch: "feat/y", worktree: y }) },
+  ];
+  for (const tc of cases) {
+    test(tc.name, async () => {
+      const root = initRepo();
+      branchWithCommit(root, "feat/x", ".gitignore", ".claude/\n/report/\n");
+      branchWithCommit(root, "feat/y", "h", "y");
+      const x = addWorktree(root, "feat/x");
+      const y = addWorktree(root, "feat/y");
+      await moveCurrent(root, { branch: "main" }, { branch: "feat/x", worktree: x }, quiet);
+      write(root, "report/index.html", "run");
+      assert.equal(status(root), "");
+      const lines: string[] = [];
+      await moveCurrent(root, { branch: "feat/x", worktree: x }, tc.to(y), (line) => lines.push(line));
+      assert.match(lines.join("\n"), /1 fichier\(s\) ignoré\(s\) par feat\/x seulement, rendu\(s\) à feat-x/);
+      assert.equal(status(root), "");
+      assert.equal(existsSync(path.join(root, "report")), false);
+      assert.equal(readFileSync(path.join(x, "report", "index.html"), "utf8"), "run");
+      assert.equal(status(x), "");
+    });
+  }
+
+  test("leaving main, files ignored by main only are parked and come back with its work", async () => {
+    const { root, worktree } = setupTaken();
+    write(root, ".gitignore", ".claude/\n/cache/\n");
+    git(root, "commit", "-qam", "ignore cache on main");
+    write(root, "cache/data", "c");
+    write(root, "f", "changed");
+    const before = gitState(root);
+    const lines: string[] = [];
+    await moveCurrent(root, { branch: "main" }, { branch: "feat/x", worktree }, (line) => lines.push(line));
+    assert.match(lines.join("\n"), /1 fichier\(s\) ignoré\(s\) par main seulement, garé\(s\)/);
+    assert.equal(status(root), "");
+    assert.equal(existsSync(path.join(root, "cache")), false);
+    await moveCurrent(root, { branch: "feat/x", worktree }, { branch: "main" }, quiet);
+    assert.equal(readFileSync(path.join(root, "cache", "data"), "utf8"), "c");
+    assert.equal(gitState(root), before);
+    assert.equal(git(root, "stash", "list"), "");
+  });
+});
+
 describe("syncToMain", () => {
   const cases = [
     { name: "nothing new", work: (_root: string, _worktree: string) => undefined, want: false, wantStaged: [] as string[], log: /Rien de nouveau/ },

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { mkdir, rename, rmdir } from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
 
@@ -131,13 +132,45 @@ export async function park(cwd: string, branch: string): Promise<boolean> {
 }
 
 export async function restorePark(cwd: string, branch: string): Promise<boolean> {
-  const entries = (await git(cwd, "stash", "list", "--format=%H %gs")).stdout.split("\n");
-  const sha = entries.find((entry) => entry.endsWith(`: ${parkPrefix}${branch}`))?.split(" ")[0];
-  if (!sha) return false;
-  await git(cwd, "stash", "apply", "-q", "--index", sha);
-  const ref = (await git(cwd, "stash", "list", "--format=%gd %H")).stdout.split("\n").find((entry) => entry.endsWith(` ${sha}`))?.split(" ")[0];
-  if (ref) await git(cwd, "stash", "drop", "-q", ref);
-  return true;
+  let restored = false;
+  for (;;) {
+    const entries = (await git(cwd, "stash", "list", "--format=%H %gs")).stdout.split("\n");
+    const sha = entries.find((entry) => entry.endsWith(`: ${parkPrefix}${branch}`))?.split(" ")[0];
+    if (!sha) return restored;
+    await git(cwd, "stash", "apply", "-q", "--index", sha);
+    const ref = (await git(cwd, "stash", "list", "--format=%gd %H")).stdout.split("\n").find((entry) => entry.endsWith(` ${sha}`))?.split(" ")[0];
+    if (!ref) return true;
+    await git(cwd, "stash", "drop", "-q", ref);
+    restored = true;
+  }
+}
+
+// Files ignored by the branch leaving current, and not by the new one, surface as untracked right after the switch.
+async function relocateExposed(main: string, from: Place, log: Log): Promise<void> {
+  const files = (await git(main, "ls-files", "--others", "--exclude-standard", "-z")).stdout.split("\0").filter(Boolean);
+  if (files.length === 0) return;
+  if (!from.worktree) {
+    await git(main, "stash", "push", "-q", "-u", "-m", `${parkPrefix}${from.branch}`);
+    log(`${files.length} fichier(s) ignoré(s) par ${from.branch} seulement, garé(s) avec son travail (stash ${parkPrefix}${from.branch})`);
+    return;
+  }
+  for (const file of files) {
+    const target = path.join(from.worktree, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await rename(path.join(main, file), target);
+    await removeEmptyParents(main, path.dirname(file));
+  }
+  log(`${files.length} fichier(s) ignoré(s) par ${from.branch} seulement, rendu(s) à ${path.basename(from.worktree)}`);
+}
+
+async function removeEmptyParents(root: string, dir: string): Promise<void> {
+  for (; dir !== "."; dir = path.dirname(dir)) {
+    try {
+      await rmdir(path.join(root, dir));
+    } catch {
+      return;
+    }
+  }
 }
 
 export async function syncToMain(main: string, worktree: string, log: Log, keepConflicts = false): Promise<boolean> {
@@ -200,6 +233,7 @@ export async function moveCurrent(main: string, from: Place, to: Place, log: Log
     if (parked) await restorePark(main, from.branch);
     throw error;
   }
+  await relocateExposed(main, from, log);
   if (toSaved) {
     await unwindSnapshots(main);
     log(`Travail du worktree restauré sur current tel quel (indexé, non indexé, non suivi), ${to.branch} reste sur son dernier vrai commit`);
