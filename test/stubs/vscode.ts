@@ -9,7 +9,7 @@ export const calls: Call[] = [];
 export const messages: { kind: "error" | "warning" | "info"; text: string }[] = [];
 export let warningAnswer: string | undefined;
 export const handlers = new Map<string, (...args: unknown[]) => unknown>();
-export const state = { workspaceFolders: [] as string[] };
+export const state = { workspaceFolders: [] as string[], claudeExtension: "/nowhere" };
 
 export function reset(): void {
   calls.length = 0;
@@ -17,6 +17,7 @@ export function reset(): void {
   warningAnswer = undefined;
   handlers.clear();
   state.workspaceFolders = [];
+  state.claudeExtension = "/nowhere";
 }
 
 export function answerWarnings(answer: string | undefined): void {
@@ -95,8 +96,8 @@ export const workspace = {
 };
 
 export const extensions = {
-  getExtension(): { activate(): Promise<void> } | undefined {
-    return { activate: async () => undefined };
+  getExtension(): { activate(): Promise<void>; extensionPath: string } | undefined {
+    return { activate: async () => undefined, extensionPath: state.claudeExtension };
   },
 };
 

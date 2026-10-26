@@ -14,6 +14,18 @@ avec les conversations Claude regroupées par worktree git. Un clic ouvre la con
 - Le clic appelle la commande interne `claude-vscode.editor.open` avec l'id de session. Non
   documentée : à revérifier après chaque mise à jour de l'extension Claude Code.
 
+## Rebaser sur la branche par défaut
+
+"Rebaser sur main" lance Claude Code sans interface (`claude -p`) là où la branche est extraite,
+avec le binaire livré par l'extension Claude Code (`resources/native-binary/claude`, sinon `claude`
+du PATH), en `--safe-mode --permission-mode auto`, `git push` interdit. Avant, le travail non
+committé part en commits wip rebasés avec la branche ; après, ils sont défaits et le travail
+retrouve son état (indexé, non indexé, non suivi). Claude résout les conflits ; si le rebase n'est
+pas terminé à la fin (abandon, erreur, 30 min dépassées), `git rebase --abort` et tout revient à
+l'état de départ, avec l'explication de Claude dans le message d'erreur. Chaque étape s'affiche
+dans la vue ; la session, nommée "Rebase de <branche> sur <cible>", se reprend avec
+`claude --resume` dans le dossier de la branche. Rien n'est poussé.
+
 ## Construire et installer (fish)
 
 ```fish

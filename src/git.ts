@@ -18,6 +18,8 @@ export interface Place {
 
 export type Log = (line: string) => void;
 
+export type Agent = (cwd: string, name: string, prompt: string) => Promise<string>;
+
 const snapshotTrailer = "Worktree-Hub-Snapshot";
 const stagedTrailer = "Worktree-Hub-Staged";
 const parkPrefix = "worktree-hub:park:";
@@ -253,21 +255,46 @@ export async function fetchOrigin(cwd: string, log: Log = () => undefined): Prom
   await run("git", ["fetch", "-q", "--prune", "origin"], { cwd, timeout: fetchTimeoutMs, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
 }
 
-export async function mergeDefaultInto(root: string, branch: string, log: Log): Promise<void> {
+// The uncommitted work rides the rebase as wip commits: the agent resolves its conflicts too, and an unfinished run is undone.
+export async function rebaseOnDefault(root: string, branch: string, agent: Agent, log: Log): Promise<void> {
   const checkout = (await listWorktrees(root)).find((tree) => tree.branch === branch)?.path;
-  if (!checkout) throw new Error(`${branch} n'est extraite nulle part : rien n'a été fusionné`);
+  if (!checkout) throw new Error(`${branch} n'est extraite nulle part : rien n'a été rebasé`);
   await fetchOrigin(checkout, log);
   const target = await mergeTarget(checkout);
-  log(`Dans ${path.basename(checkout)} : git merge --no-edit ${target}`);
+  // Pinned: a background fetch may move the target while the agent works.
+  const base = (await git(checkout, "rev-parse", target)).stdout.trim();
+  const saved = await snapshot(checkout, "rebase", true);
+  if (saved) log("Travail non committé mis de côté en commits wip, rebasés avec la branche");
+  log(`Claude rebase ${branch} sur ${target} dans ${path.basename(checkout)}`);
+  let summary = "";
+  let failure: unknown;
   try {
-    await git(checkout, "merge", "--no-edit", target);
+    summary = await agent(checkout, `Rebase de ${branch} sur ${target}`, rebasePrompt(branch, target, saved));
   } catch (error) {
-    const conflicts = await unmergedPaths(checkout);
-    if (conflicts.length === 0) throw error;
-    await git(checkout, "merge", "--abort");
-    throw new Error(`conflit sur ${conflicts.join(", ")} : merge annulé, ${branch} est inchangée`);
+    failure = error;
   }
-  log(`${target} fusionnée dans ${branch}`);
+  const rebased = failure === undefined && (await isRebasedOnto(checkout, branch, base));
+  if (!rebased) await git(checkout, "rebase", "--abort").then(() => log("Rebase inachevé : git rebase --abort"), () => undefined);
+  if (saved && (await unwindSnapshots(checkout)) > 0) log("Travail non committé restauré tel quel (indexé, non indexé, non suivi)");
+  if (failure !== undefined) throw failure;
+  if (!rebased) throw new Error(`${branch} n'est pas rebasée sur ${target}, la branche et son travail sont revenus à leur état de départ${summary ? `. Claude : ${summary}` : ""}`);
+  log(`${branch} rebasée sur ${target}`);
+}
+
+function rebasePrompt(branch: string, target: string, saved: boolean): string {
+  return [
+    `Rebase la branche ${branch} sur ${target}, dans ce dossier : git rebase ${target}. ${target} est à jour, le fetch est fait.`,
+    saved ? `Les derniers commits "wip" (trailers ${stagedTrailer} et ${snapshotTrailer}) sont du travail non committé mis de côté par Worktree Hub : rebase-les avec le reste, laisse-les en dernier, sans toucher à leur message ni les fusionner.` : "",
+    `À chaque conflit : lis les deux côtés (les commits de ${target} et ceux de ${branch}), résous en gardant l'intention des deux, git add, puis git rebase --continue, jusqu'à la fin du rebase. Si c'est rapide, vérifie que le code résolu compile.`,
+    "Interdit : git rebase --skip, supprimer, fusionner ou renommer des commits, reset --hard, push, toucher aux autres branches ou worktrees.",
+    "Si tu ne peux vraiment pas finir : git rebase --abort, puis explique pourquoi.",
+    "Termine par un résumé en français d'une à trois lignes : les conflits rencontrés et comment tu les as résolus.",
+  ].filter(Boolean).join("\n");
+}
+
+async function isRebasedOnto(cwd: string, branch: string, base: string): Promise<boolean> {
+  if ((await git(cwd, "branch", "--show-current")).stdout.trim() !== branch) return false;
+  return git(cwd, "merge-base", "--is-ancestor", base, "HEAD").then(() => true, () => false);
 }
 
 export function gitError(error: unknown): string {

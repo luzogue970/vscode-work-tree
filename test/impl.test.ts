@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { beforeEach, describe, test } from "node:test";
 import type { Build } from "../src/build";
@@ -98,6 +98,23 @@ async function transition(view: FakeWebviewView, message: unknown): Promise<{ li
   await nextData(view, dataBefore);
   const last = view.last("transition") as { lines: string[]; status: string };
   return { lines: last.lines, status: last.status };
+}
+
+function fakeClaudeExtension(succeeds: boolean): string {
+  const dir = tempDir("claude-ext");
+  const run = succeeds
+    ? `require("node:child_process").execFileSync("git", ["rebase", "-q", "main"], { stdio: "ignore" });
+say({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "git rebase main", description: "Rebase sur main" } }, { type: "text", text: "Rebasée sans conflit." }] } });
+say({ type: "result", subtype: "success", is_error: false, result: "Rebasée sans conflit." });`
+    : `say({ type: "result", subtype: "error_during_execution", is_error: true, result: "quota dépassé" });
+process.exit(1);`;
+  write(dir, "resources/native-binary/claude", `#!/usr/bin/env node
+const say = (event) => console.log(JSON.stringify(event));
+say({ type: "system", subtype: "init", session_id: "fake-session" });
+${run}
+`);
+  chmodSync(path.join(dir, "resources/native-binary/claude"), 0o755);
+  return dir;
 }
 
 function opened(): unknown[][] {
@@ -236,13 +253,15 @@ describe("opening conversations", () => {
     });
   }
 
-  const updates = [
-    { name: "Mettre à jour merges main in the background, without a conversation", message: (x: unknown, _y: unknown) => ({ type: "mergeDefault", target: x }), wantMerged: ["feat/x"] },
-    { name: "updating every late worktree merges them one after the other", message: (x: unknown, y: unknown) => ({ type: "mergeDefaultAll", targets: [x, y] }), wantMerged: ["feat/x", "feat/y"] },
+  const rebases = [
+    { name: "Rebaser sur main has Claude rebase the branch in the background, without a conversation", message: (x: unknown, _y: unknown) => ({ type: "rebaseDefault", target: x }), succeeds: true, wantRebased: ["feat/x"], wantStatus: "done", wantLog: /Session Claude fake-session[\s\S]*Bash : Rebase sur main[\s\S]*feat\/x rebasée sur main/, wantErrors: 0 },
+    { name: "rebasing every late worktree runs Claude on them one after the other", message: (x: unknown, y: unknown) => ({ type: "rebaseDefaultAll", targets: [x, y] }), succeeds: true, wantRebased: ["feat/x", "feat/y"], wantStatus: "done", wantLog: /feat\/y rebasée sur main/, wantErrors: 0 },
+    { name: "a failed Claude run ends in error and leaves the branch as it was", message: (x: unknown, _y: unknown) => ({ type: "rebaseDefault", target: x }), succeeds: false, wantRebased: [] as string[], wantStatus: "error", wantLog: /quota dépassé/, wantErrors: 1 },
   ];
-  for (const tc of updates) {
+  for (const tc of rebases) {
     test(tc.name, async () => {
       const f = await fixture({ second: true });
+      state.claudeExtension = fakeClaudeExtension(tc.succeeds);
       write(f.root, "m", "main\n");
       git(f.root, "add", "m");
       git(f.root, "commit", "-qm", "main advance");
@@ -250,12 +269,13 @@ describe("opening conversations", () => {
       calls.length = 0;
       const other = path.join(path.dirname(f.worktree), "feat-y");
       f.view.send(tc.message({ path: f.worktree, branch: "feat/x" }, { path: other, branch: "feat/y" }));
-      const merged = () => ["feat/x", "feat/y"].filter((branch) => git(f.root, "rev-list", "--count", `${branch}..main`) === "0");
-      await waitFor(() => merged().length === tc.wantMerged.length && f.view.last("transition")?.status === "done", 30000);
-      assert.deepEqual(merged(), tc.wantMerged);
-      assert.deepEqual((await refreshed(f.view)).filter((one) => !one.main && one.behind === 0).map((one) => one.branch), tc.wantMerged);
+      const rebased = () => ["feat/x", "feat/y"].filter((branch) => git(f.root, "rev-list", "--count", `${branch}..main`) === "0");
+      await waitFor(() => rebased().length === tc.wantRebased.length && f.view.last("transition")?.status === tc.wantStatus, 30000);
+      assert.deepEqual(rebased(), tc.wantRebased);
+      assert.match((f.view.last("transition") as { lines: string[] }).lines.join("\n"), tc.wantLog);
+      assert.deepEqual((await refreshed(f.view)).filter((one) => !one.main && one.behind === 0).map((one) => one.branch), tc.wantRebased);
       assert.deepEqual(opened(), []);
-      assert.equal(messages.length, 0);
+      assert.equal(messages.filter((message) => message.kind === "error").length, tc.wantErrors);
     });
   }
 

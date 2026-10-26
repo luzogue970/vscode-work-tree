@@ -51,8 +51,8 @@ type Incoming =
   | { type: "gotoDefault"; target: Target }
   | { type: "sync"; target: Target }
   | { type: "newSession"; target: Target }
-  | { type: "mergeDefault"; target: Target }
-  | { type: "mergeDefaultAll"; targets: Target[] };
+  | { type: "rebaseDefault"; target: Target }
+  | { type: "rebaseDefaultAll"; targets: Target[] };
 
 const fetchEveryMs = 5 * 60_000;
 
@@ -64,8 +64,8 @@ const commands: Record<Exclude<Incoming["type"], "ready" | "refresh">, string> =
   gotoDefault: "worktreeHub.gotoDefault",
   sync: "worktreeHub.sync",
   newSession: "worktreeHub.newSession",
-  mergeDefault: "worktreeHub.mergeDefault",
-  mergeDefaultAll: "worktreeHub.mergeDefaultAll",
+  rebaseDefault: "worktreeHub.rebaseDefault",
+  rebaseDefaultAll: "worktreeHub.rebaseDefaultAll",
 };
 
 export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposable {
@@ -75,6 +75,7 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
   private lastPosted = "";
   private readonly listeners: vscode.Disposable[] = [];
   private queue: Promise<unknown> = Promise.resolve();
+  private queued = 0;
   private readonly syncErrors = new Map<string, string>();
   private fetchedAt = 0;
   private fetching: Promise<void> | undefined;
@@ -137,7 +138,8 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
     if (!root) return { groups: [], error: "Aucun dossier ouvert" };
     this.fetchInBackground(root, force);
     try {
-      await this.exclusive(() => this.bringBack(root));
+      // A transition holding the queue for minutes (an AI rebase) would otherwise stack one bring-back per refresh.
+      if (this.queued === 0) await this.exclusive(() => this.bringBack(root));
       const groups = await buildGroups(root, this.store);
       for (const group of groups) group.syncError = this.syncErrors.get(group.path);
       return { groups, defaultBranch: await defaultBranch(root) };
@@ -155,7 +157,8 @@ export class WorktreesView implements vscode.WebviewViewProvider, vscode.Disposa
   }
 
   exclusive<T>(task: () => Promise<T>): Promise<T> {
-    const next = this.queue.then(task, task);
+    this.queued++;
+    const next = this.queue.then(task, task).finally(() => this.queued--);
     this.queue = next.catch(() => undefined);
     return next;
   }

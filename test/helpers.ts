@@ -13,6 +13,15 @@ export function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...identity } }).trim();
 }
 
+export function tryGit(cwd: string, ...args: string[]): boolean {
+  try {
+    execFileSync("git", args, { cwd, stdio: "ignore", env: { ...process.env, ...identity } });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function initRepo(): string {
   const root = tempDir("repo");
   git(root, "init", "-q", "-b", "main");

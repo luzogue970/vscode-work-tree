@@ -79,9 +79,9 @@
 
   function renderLate(groups) {
     const box = el("div", "late-all");
-    const button = el("button", "action", `Mettre à jour les ${groups.length} worktrees en retard sur ${defaultBranch}`);
-    button.title = `Fusionne ${defaultBranch} dans chaque branche en retard, en arrière-plan, l'une après l'autre ; un conflit annule le merge de cette branche sans rien changer`;
-    button.addEventListener("click", () => vscode.postMessage({ type: "mergeDefaultAll", targets: groups.map((group) => ({ path: group.path, branch: group.branch })) }));
+    const button = el("button", "action", `Rebaser sur ${defaultBranch} les ${groups.length} worktrees en retard`);
+    button.title = `Claude rebase chaque branche en retard sur ${defaultBranch}, l'une après l'autre, en arrière-plan, conflits résolus compris ; le travail non committé suit, dans son état. Une branche qu'il ne finit pas revient à son état de départ`;
+    button.addEventListener("click", () => vscode.postMessage({ type: "rebaseDefaultAll", targets: groups.map((group) => ({ path: group.path, branch: group.branch })) }));
     box.append(button);
     return box;
   }
@@ -169,7 +169,7 @@
     if (active && group.state === "owned") actions.append(action("Aller", `Échange : la branche de current retourne dans son worktree (ou son travail est garé), ${group.branch} arrive sur current avec le travail du worktree tel quel (indexé, non indexé, non suivi), et sa conversation s'ouvre`, "goto", group));
     if (active && group.syncError) actions.append(action("Réessayer le rapatriement", "Amène les modifs faites dans le worktree sur current, indexées (staged) ; un conflit y arrive avec ses marqueurs, à résoudre sur current", "sync", group));
     if (active && group.state === "taken") actions.append(action(`Aller sur ${defaultBranch}`, `Synchronise ce qui reste du worktree, current passe sur ${defaultBranch}, le worktree reprend ${group.branch} avec tout le travail non committé (le sien et celui fait sur current), indexé ou non comme sur current`, "gotoDefault", group));
-    if (active && group.behind > 0) actions.append(action("Mettre à jour", `Fusionne ${defaultBranch} dans ${group.branch} en arrière-plan, là où la branche est extraite ; un conflit annule le merge sans rien changer`, "mergeDefault", group));
+    if (active && group.behind > 0) actions.append(action(`Rebaser sur ${defaultBranch}`, `Claude rebase ${group.branch} sur ${defaultBranch} en arrière-plan, là où la branche est extraite, conflits résolus compris ; le travail non committé suit, dans son état. S'il ne finit pas, tout revient à l'état de départ`, "rebaseDefault", group));
     if (active) actions.append(action("+ Conversation", "Nouvelle conversation Claude dans ce worktree : ouvre un onglet ici et lance /worktree " + group.branch, "newSession", group));
     if (chips.childElementCount === 0) chips.remove();
     if (actions.childElementCount === 0) actions.remove();

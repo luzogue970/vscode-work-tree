@@ -2,8 +2,8 @@ import { access } from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
-import { configDir } from "./claude";
-import { defaultBranch, gitCommonDir, gitError, listWorktrees, mergeDefaultInto, moveCurrent, syncToMain, visitedWorktree, type Log } from "./git";
+import { configDir, runClaude } from "./claude";
+import { defaultBranch, gitCommonDir, gitError, listWorktrees, moveCurrent, rebaseOnDefault, syncToMain, visitedWorktree, type Log } from "./git";
 import { StateStore } from "./state";
 import { WorktreesView, worksIn, type ListedSession, type Target } from "./view";
 
@@ -32,7 +32,10 @@ export async function activate(context: vscode.ExtensionContext, dir: string, ru
     watcher.onDidDelete(refresh);
   }
   const poll = setInterval(refresh, pollMs).unref();
-  const update = (target: Target) => transition(view, target, (root, log) => mergeDefaultInto(root, target.branch, log));
+  const rebase = (target: Target) => transition(view, target, async (root, log) => {
+    const binary = await claudeBinary();
+    await rebaseOnDefault(root, target.branch, (cwd, name, prompt) => runClaude(binary, cwd, name, prompt, log), log);
+  });
   const disposables: vscode.Disposable[] = [
     ...watchers,
     { dispose: () => clearInterval(poll) },
@@ -40,9 +43,9 @@ export async function activate(context: vscode.ExtensionContext, dir: string, ru
     vscode.commands.registerCommand("worktreeHub.open", (session: ListedSession) => openSession(session)),
     vscode.commands.registerCommand("worktreeHub.openInWindow", (session: ListedSession) => openInWindow(context, session)),
     vscode.commands.registerCommand("worktreeHub.newSession", (target: Target) => prefill(`/worktree ${target.branch}`)),
-    vscode.commands.registerCommand("worktreeHub.mergeDefault", update),
-    vscode.commands.registerCommand("worktreeHub.mergeDefaultAll", async (targets: Target[]) => {
-      for (const target of targets) await update(target);
+    vscode.commands.registerCommand("worktreeHub.rebaseDefault", rebase),
+    vscode.commands.registerCommand("worktreeHub.rebaseDefaultAll", async (targets: Target[]) => {
+      for (const target of targets) await rebase(target);
     }),
     vscode.commands.registerCommand("worktreeHub.goto", (target: Target) => goto(view, target)),
     vscode.commands.registerCommand("worktreeHub.gotoDefault", (target: Target) => transition(view, target, async (root, log) => {
@@ -130,6 +133,13 @@ async function openPending(context: vscode.ExtensionContext): Promise<void> {
   await vscode.extensions.getExtension("anthropic.claude-code")?.activate();
   await new Promise((resolve) => setTimeout(resolve, claudeReadyMs));
   await vscode.commands.executeCommand("claude-vscode.editor.open", pending.id);
+}
+
+// The extension host's PATH misses the user's shell setup: the CLI bundled with Claude Code's extension comes first.
+async function claudeBinary(): Promise<string> {
+  const extension = vscode.extensions.getExtension("anthropic.claude-code");
+  const bundled = extension ? path.join(extension.extensionPath, "resources", "native-binary", "claude") : undefined;
+  return bundled && (await exists(bundled)) ? bundled : "claude";
 }
 
 function workspaceRoot(): string | undefined {

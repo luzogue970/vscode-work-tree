@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import * as path from "node:path";
 import { describe, test } from "node:test";
-import { behindCount, countChanges, defaultBranch, gitCommonDir, gitError, isMerged, listBranches, listWorktrees, mergeDefaultInto, mergeTarget, moveCurrent, park, restorePark, snapshot, syncToMain, unwindSnapshots } from "../src/git";
-import { addWorktree, branchWithCommit, git, initRepo, tempDir, write } from "./helpers";
+import { behindCount, countChanges, defaultBranch, gitCommonDir, gitError, isMerged, listBranches, listWorktrees, mergeTarget, moveCurrent, park, rebaseOnDefault, restorePark, snapshot, syncToMain, unwindSnapshots } from "../src/git";
+import { addWorktree, branchWithCommit, git, initRepo, tempDir, tryGit, write } from "./helpers";
 
 const quiet = () => undefined;
 
@@ -494,12 +494,26 @@ describe("park and restorePark", () => {
   }
 });
 
-describe("mergeDefaultInto", () => {
+describe("rebaseOnDefault", () => {
+  type Fake = (cwd: string, target: string) => void;
+  const rebases: Fake = (cwd, target) => git(cwd, "rebase", "-q", target);
+  const resolves: Fake = (cwd, target) => {
+    if (tryGit(cwd, "rebase", target)) return;
+    write(cwd, "f", "resolved\n");
+    git(cwd, "add", "f");
+    assert.ok(tryGit(cwd, "-c", "core.editor=true", "rebase", "--continue"));
+  };
+  const givesUp: Fake = (cwd, target) => assert.equal(tryGit(cwd, "rebase", target), false);
+  const fails: Fake = () => {
+    throw new Error("quota dépassé");
+  };
   const cases = [
-    { name: "the worktree's branch gets main merged where it is checked out", taken: false, remote: false, conflict: false, wantError: undefined as RegExp | undefined },
-    { name: "a branch on current is merged on current", taken: true, remote: false, conflict: false, wantError: undefined },
-    { name: "origin is fetched before merging origin/main", taken: false, remote: true, conflict: false, wantError: undefined },
-    { name: "a conflict aborts the merge and leaves the branch as it was", taken: false, remote: false, conflict: true, wantError: /conflit sur f : merge annulé/ },
+    { name: "a worktree's branch is rebased where it is checked out, its work kept as it was", taken: false, remote: false, conflict: false, agent: rebases, wantError: undefined as RegExp | undefined, wantF: "main side\n" },
+    { name: "a branch on current is rebased on current", taken: true, remote: false, conflict: false, agent: rebases, wantError: undefined, wantF: "main side\n" },
+    { name: "origin is fetched before rebasing on origin/main", taken: false, remote: true, conflict: false, agent: rebases, wantError: undefined, wantF: "main side\n" },
+    { name: "the agent resolves a conflict and finishes the rebase", taken: false, remote: false, conflict: true, agent: resolves, wantError: undefined, wantF: "resolved\n" },
+    { name: "an agent giving up mid-rebase is undone, its explanation kept", taken: false, remote: false, conflict: true, agent: givesUp, wantError: /n'est pas rebasée sur main, .*Claude : conflit sans issue/, wantF: "branch side\n" },
+    { name: "a failing agent leaves everything as it was", taken: false, remote: false, conflict: false, agent: fails, wantError: /quota dépassé/, wantF: "main\n" },
   ];
   for (const tc of cases) {
     test(tc.name, async () => {
@@ -515,12 +529,28 @@ describe("mergeDefaultInto", () => {
       const mainTip = git(main, "rev-parse", "HEAD");
       if (tc.taken) await moveCurrent(root, { branch: "main" }, { branch: "feat/x", worktree }, quiet);
       const checkout = tc.taken ? root : worktree;
+      write(checkout, "s", "staged");
+      git(checkout, "add", "s");
+      write(checkout, "g", "unstaged");
+      write(checkout, "u", "untracked");
       const tip = git(checkout, "rev-parse", "HEAD");
-      const done = mergeDefaultInto(root, "feat/x", quiet);
+      const subject = git(checkout, "log", "-1", "--format=%s");
+      const before = gitState(checkout);
+      const target = tc.remote ? "origin/main" : "main";
+      const asked: string[] = [];
+      const done = rebaseOnDefault(root, "feat/x", async (cwd, name, prompt) => {
+        asked.push(cwd, name, prompt);
+        tc.agent(cwd, target);
+        return "conflit sans issue";
+      }, quiet);
       if (tc.wantError) await assert.rejects(done, tc.wantError);
       else await done;
+      assert.deepEqual(asked.slice(0, 2), [checkout, `Rebase de feat/x sur ${target}`]);
+      assert.match(asked[2], /Worktree-Hub-Staged/);
       assert.equal(git(checkout, "branch", "--show-current"), "feat/x");
-      assert.equal(existsSync(git(checkout, "rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD")), false);
+      assert.equal(gitState(checkout), before);
+      assert.equal(git(checkout, "log", "-1", "--format=%s"), subject);
+      assert.equal(readFileSync(path.join(checkout, "f"), "utf8"), tc.wantF);
       if (tc.wantError) assert.equal(git(checkout, "rev-parse", "HEAD"), tip);
       else assert.equal(git(checkout, "merge-base", "--is-ancestor", mainTip, "HEAD"), "");
     });
@@ -529,7 +559,7 @@ describe("mergeDefaultInto", () => {
   test("a branch checked out nowhere is refused", async () => {
     const root = initRepo();
     git(root, "branch", "feat/x");
-    await assert.rejects(mergeDefaultInto(root, "feat/x", quiet), /extraite nulle part/);
+    await assert.rejects(rebaseOnDefault(root, "feat/x", async () => "", quiet), /extraite nulle part/);
   });
 });
 

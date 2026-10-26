@@ -1,6 +1,9 @@
+import { spawn } from "node:child_process";
 import { link, mkdir, open, readdir, readFile, stat, type FileHandle } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createInterface } from "node:readline";
+import type { Log } from "./git";
 
 export interface Session {
   id: string;
@@ -18,8 +21,25 @@ export interface ScanState {
   bindings: Record<string, string>;
 }
 
+interface StreamBlock {
+  type: string;
+  text?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
+interface StreamEvent {
+  type?: string;
+  subtype?: string;
+  session_id?: string;
+  is_error?: boolean;
+  result?: string;
+  message?: { content?: StreamBlock[] };
+}
+
 // Transcripts grow to tens of MB: only the first and last 64 KB are read.
 const chunkSize = 64 * 1024;
+const agentTimeoutMs = 30 * 60_000;
 const cache = new Map<string, { modified: number; session: Session | undefined }>();
 const enterWorktreeCall = /"name":"EnterWorktree","input":\{"(path|name)":"((?:[^"\\]|\\.)*)"/g;
 
@@ -112,6 +132,46 @@ export async function mirrorTranscripts(sessions: Session[], root: string): Prom
     }
   }
   return linked;
+}
+
+// Headless Claude Code: every step is logged, the run resolves or rejects with its last word.
+export function runClaude(binary: string, cwd: string, name: string, prompt: string, log: Log): Promise<string> {
+  const args = ["-p", prompt, "--name", name, "--output-format", "stream-json", "--verbose", "--safe-mode", "--permission-mode", "auto", "--disallowedTools", "Bash(git push *)"];
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, args, { cwd, timeout: agentTimeoutMs, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_EDITOR: "true", GIT_TERMINAL_PROMPT: "0" } });
+    let result: StreamEvent | undefined;
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => (stderr = (stderr + chunk.toString()).slice(-4096)));
+    createInterface({ input: child.stdout }).on("line", (line) => {
+      const event = parseEvent(line);
+      if (event?.type === "system" && event.subtype === "init") log(`Session Claude ${event.session_id}`);
+      if (event?.type === "assistant") for (const block of event.message?.content ?? []) {
+        const step = describeStep(block);
+        if (step) log(step);
+      }
+      if (event?.type === "result") result = event;
+    });
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      if (code === 0 && result?.is_error === false) resolve(result.result?.trim() ?? "");
+      else reject(new Error(result?.result?.trim() || stderr.trim() || `claude s'est arrêté sans résultat (${signal ?? `code ${code}`})`));
+    });
+  });
+}
+
+function parseEvent(line: string): StreamEvent | undefined {
+  try {
+    return JSON.parse(line) as StreamEvent;
+  } catch {
+    return undefined;
+  }
+}
+
+function describeStep(block: StreamBlock): string | undefined {
+  if (block.type === "text") return block.text?.trim() || undefined;
+  if (block.type !== "tool_use") return undefined;
+  const detail = ["description", "command", "file_path", "pattern"].map((key) => block.input?.[key]).find((value) => typeof value === "string") as string | undefined;
+  return detail ? `${block.name} : ${detail}` : block.name;
 }
 
 function isAlive(pid: number): boolean {
