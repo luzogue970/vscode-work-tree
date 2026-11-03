@@ -85,6 +85,11 @@ if [ -e "$dir" ]; then
   exit 0
 fi
 
+# Unignored, the nested worktrees would be staged as gitlinks by the add -A of take.
+if ! git -C "$root" check-ignore -q .claude/worktrees/; then
+  echo /.claude/worktrees/ >>"$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+fi
+
 if [ "$holder" = "$root" ]; then
   git -C "$root" worktree add --detach "$dir" "$branch"
 elif git -C "$root" show-ref --verify --quiet "refs/heads/$branch"; then
@@ -102,9 +107,11 @@ else
 fi
 
 # .worktreeinclude entries are copied as literal paths: globs are not expanded here.
-while IFS= read -r path; do
-  [[ -z "$path" || "$path" == \#* || ! -e "$root/$path" ]] && continue
-  (cd "$root" && cp -a --parents "${path%/}" "$dir/")
-done <"$root/.worktreeinclude"
+if [ -f "$root/.worktreeinclude" ]; then
+  while IFS= read -r path; do
+    [[ -z "$path" || "$path" == \#* || ! -e "$root/$path" ]] && continue
+    (cd "$root" && cp -a --parents "${path%/}" "$dir/")
+  done <"$root/.worktreeinclude"
+fi
 
 echo "created $dir"

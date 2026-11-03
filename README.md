@@ -44,6 +44,15 @@ Une conversation qui vit dans un worktree ne se rouvre pas depuis la fenêtre du
 (Claude Code ouvre une conversation vide à la place) : la vue le dit et propose d'ouvrir une
 fenêtre sur le worktree, où la conversation s'ouvre toute seule.
 
+## Skill `/worktree`
+
+`skills/worktree/` : la skill Claude Code qui crée, rejoint, met à jour et reprend les worktrees
+de la vue, avec son script. Skill personnelle, valable dans tous les repos, à relier une fois :
+
+```fish
+ln -sfn ~/Documents/mes-dev/worktree-hub/skills/worktree ~/.claude/skills/worktree
+```
+
 ## Tests
 
 `npm test` compile puis lance trois niveaux avec le runner de Node (`node --test`), sans dépendance :
