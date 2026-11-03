@@ -9,3 +9,4 @@ tsconfig.test.json
 .gitignore
 **/*.map
 *.vsix
+skills/**
