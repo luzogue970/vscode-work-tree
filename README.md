@@ -13,6 +13,9 @@ avec les conversations Claude regroupées par worktree git. Un clic ouvre la con
   titre (`customTitle`, `aiTitle`, `lastPrompt`, premier message).
 - Le clic appelle la commande interne `claude-vscode.editor.open` avec l'id de session. Non
   documentée : à revérifier après chaque mise à jour de l'extension Claude Code.
+- `$XDG_RUNTIME_DIR/claude-tray/open-request`, écrit par l'icône `claude-tray` du dépôt
+  qubes-dom0 : la fenêtre dont le dossier correspond le renomme pour le prendre, puis ouvre la
+  conversation demandée.
 
 ## Rebaser sur la branche par défaut
 

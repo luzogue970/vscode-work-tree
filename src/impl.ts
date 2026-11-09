@@ -1,4 +1,6 @@
-import { access } from "node:fs/promises";
+import { mkdirSync, watch } from "node:fs";
+import { access, readFile, rename, rm } from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Build } from "./build";
@@ -18,9 +20,16 @@ interface PendingOpen {
   id: string;
 }
 
+interface OpenRequest {
+  folder: string;
+  id: string;
+  at: number;
+}
+
 const pollMs = 5000;
 const pendingOpenKey = "pendingOpen";
 const claudeReadyMs = 1500;
+const openRequestMaxAgeMs = 60_000;
 
 export async function activate(context: vscode.ExtensionContext, dir: string, running: Build): Promise<Loaded> {
   const view = new WorktreesView(vscode.Uri.file(path.join(dir, "media")), running, new StateStore(context.globalState));
@@ -38,6 +47,7 @@ export async function activate(context: vscode.ExtensionContext, dir: string, ru
   });
   const disposables: vscode.Disposable[] = [
     ...watchers,
+    watchOpenRequests(),
     { dispose: () => clearInterval(poll) },
     vscode.commands.registerCommand("worktreeHub.refresh", () => view.refresh(true)),
     vscode.commands.registerCommand("worktreeHub.open", (session: ListedSession) => openSession(session)),
@@ -133,6 +143,38 @@ async function openPending(context: vscode.ExtensionContext): Promise<void> {
   await vscode.extensions.getExtension("anthropic.claude-code")?.activate();
   await new Promise((resolve) => setTimeout(resolve, claudeReadyMs));
   await vscode.commands.executeCommand("claude-vscode.editor.open", pending.id);
+}
+
+// claude-tray (rice repo, qubes-dom0) writes this file; the window whose folder matches renames it away to claim it.
+function watchOpenRequests(): vscode.Disposable {
+  const file = path.join(process.env.XDG_RUNTIME_DIR ?? os.tmpdir(), "claude-tray", "open-request");
+  mkdirSync(path.dirname(file), { recursive: true });
+  const watcher = watch(path.dirname(file), (_event, name) => {
+    if (name === path.basename(file)) void claimOpenRequest(file, 0);
+  }).unref();
+  void claimOpenRequest(file, claudeReadyMs);
+  return { dispose: () => watcher.close() };
+}
+
+async function claimOpenRequest(file: string, settleMs: number): Promise<void> {
+  const root = workspaceRoot();
+  let request: OpenRequest;
+  try {
+    request = JSON.parse(await readFile(file, "utf8")) as OpenRequest;
+  } catch {
+    return;
+  }
+  if (!root || request.folder !== root || Date.now() - request.at * 1000 > openRequestMaxAgeMs) return;
+  const claimed = `${file}.${process.pid}`;
+  try {
+    await rename(file, claimed);
+  } catch {
+    return;
+  }
+  await rm(claimed, { force: true });
+  await vscode.extensions.getExtension("anthropic.claude-code")?.activate();
+  if (settleMs > 0) await new Promise((resolve) => setTimeout(resolve, settleMs));
+  await vscode.commands.executeCommand("claude-vscode.editor.open", request.id);
 }
 
 // The extension host's PATH misses the user's shell setup: the CLI bundled with Claude Code's extension comes first.

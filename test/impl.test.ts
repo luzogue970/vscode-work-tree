@@ -52,6 +52,7 @@ async function fixture(options: { pending?: boolean; second?: boolean } = {}): P
   writeTranscript(configDir, root, "sess-main", [userLine(root, "main talk")]);
   writeTranscript(configDir, worktree, "sess-cd-only", [userLine(worktree, "cd'd there without /worktree")]);
   state.workspaceFolders = [root];
+  process.env.XDG_RUNTIME_DIR = tempDir("run");
   const context = makeContext("/ext");
   if (options.pending) await context.globalState.update("pendingOpen", { folder: root, id: "pending-id" });
   const loaded = await activate(context as never, "/ext", running);
@@ -295,7 +296,30 @@ describe("opening conversations", () => {
     await waitFor(() => calls.some((call) => call.command === "claude-vscode.editor.open" && call.args[0] === "pending-id"), 4000);
     assert.equal(f.context.globalState.get("pendingOpen"), undefined);
   });
+
+  test("an open request from claude-tray for this folder is claimed and opened", async () => {
+    const f = await fixture();
+    const file = openRequest(f.root);
+    await waitFor(() => calls.some((call) => call.command === "claude-vscode.editor.open" && call.args[0] === "tray-id"));
+    assert.equal(existsSync(file), false);
+    f.loaded.dispose();
+  });
+
+  test("an open request for another folder is left to the window working there", async () => {
+    const f = await fixture();
+    const file = openRequest(f.worktree);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(calls.some((call) => call.args[0] === "tray-id"), false);
+    assert.equal(existsSync(file), true);
+    f.loaded.dispose();
+  });
 });
+
+function openRequest(folder: string): string {
+  const file = path.join(process.env.XDG_RUNTIME_DIR ?? "", "claude-tray", "open-request");
+  writeFileSync(file, JSON.stringify({ id: "tray-id", folder, at: Date.now() / 1000 }));
+  return file;
+}
 
 describe("moving branches from the view", () => {
   test("Aller, the automatic bring-back and Aller sur main drive git, log every step and open the conversation", async () => {
